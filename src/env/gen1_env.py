@@ -268,9 +268,9 @@ class Gen1Env(SinglesEnv):
     def calc_reward(self, battle) -> float:
         return self.reward_computing_helper(
             battle,
-            fainted_value=0.15 * self.shaping_factor,
-            hp_value=0.15 * self.shaping_factor,
-            status_value=0.05 * self.shaping_factor,
+            fainted_value=0.05 * self.shaping_factor,
+            hp_value=0.05 * self.shaping_factor,
+            status_value=0.02 * self.shaping_factor,
             victory_value=1.0,
         )
 
@@ -298,10 +298,11 @@ class SB3Wrapper(gymnasium.Wrapper):
         try:
             obs_dict, reward, terminated, truncated, info = self.env.step(action)
         except ValueError:
-            # poke-env occasionally desyncs on opponent action (e.g., forced switch
-            # not matching valid orders). Treat as a lost game and reset.
+            # poke-env occasionally desyncs on opponent action. Use neutral reward
+            # (0.0) so this doesn't poison training with fake losses.
             obs, info = self.reset()
-            return obs, -1.0, True, False, info
+            info["desync"] = True
+            return obs, 0.0, True, False, info
         self._last_action_mask = obs_dict["action_mask"].astype(bool)
         return obs_dict["observation"], reward, terminated, truncated, info
 
@@ -322,6 +323,7 @@ def make_env(
     opponent_model_path: str | None = None,
     shaping_factor: float = 1.0,
     opponent_epsilon: float = 0.8,
+    selfplay_model_path: str | None = None,
 ) -> "Monitor":
     """
     Factory for a single SB3-compatible Gen 1 environment.
@@ -407,20 +409,31 @@ def make_env(
             EpsilonMaxDamagePlayer, EpsilonTypeMatchupPlayer,
             EpsilonStallPlayer, EpsilonAggressiveSwitcher,
         )
-        _MIXED_POOL = [
+        _HEURISTIC_POOL = [
             EpsilonMaxDamagePlayer,
             EpsilonTypeMatchupPlayer,
             EpsilonStallPlayer,
             EpsilonAggressiveSwitcher,
         ]
-        cls = _MIXED_POOL[env_index % len(_MIXED_POOL)]
-        opponent = cls(
-            epsilon=opponent_epsilon,
-            battle_format=battle_format,
-            account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
-            start_listening=False,
-            log_level=25,
-        )
+        # If selfplay model provided, last env slot uses frozen self-play
+        if selfplay_model_path and env_index == 3:
+            from src.agents.policy_player import FrozenPolicyPlayer
+            opponent = FrozenPolicyPlayer(
+                model_path=selfplay_model_path,
+                battle_format=battle_format,
+                account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
+                start_listening=False,
+                log_level=25,
+            )
+        else:
+            cls = _HEURISTIC_POOL[env_index % len(_HEURISTIC_POOL)]
+            opponent = cls(
+                epsilon=opponent_epsilon,
+                battle_format=battle_format,
+                account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
+                start_listening=False,
+                log_level=25,
+            )
     elif opponent_type == "policy":
         if opponent_model_path is None:
             raise ValueError("opponent_model_path required for opponent_type='policy'")

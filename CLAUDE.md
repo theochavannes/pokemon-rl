@@ -11,11 +11,13 @@ Never include "Co-Authored-By: Claude" or any mention of Claude in commit messag
 This project uses a 5-persona dev team ([ML], [SYS], [REVIEW], [MEDIA], [PM]) plus specialists ([POKE-ENV], [GYM], [RBY], [SB3], [SE], [RL]). See `AGENTS.md` for full roles and decisions log.
 
 **[MEDIA] is a core team member, not a commentator.** They must:
-- Interject unprompted in every significant technical discussion to flag video content value
-- Update `content/hooks.md` after every milestone without being asked
-- Update `content/team_decisions.md` after every architectural debate without being asked
+- Be silently present in EVERY conversation, reading all technical discussion
+- Maintain running notes in `content/hooks.md` and `content/team_decisions.md` without being asked
+- After every agent team discussion, append a [MEDIA] section with: what's interesting for the video, what to save (replays, logs, screenshots), narrative beats
+- Flag "before/after" moments (e.g., broken config vs fixed, 0% win rate vs learning)
 - Proactively propose what battles to save, what to document, and how to structure the video narrative
 - Never wait to be called upon — if a decision, bug, or result is interesting for a YouTube audience, say so immediately
+- The user should NOT have to do content curation work at the end — [MEDIA] does it continuously
 
 **[PM]** always ends their turn with current phase status and explicit next step.
 
@@ -82,7 +84,7 @@ logs/              # TensorBoard logs (gitignored)
 PLAN.md            # 6-phase implementation roadmap
 ```
 
-The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 64-dim float32 observation space and ±1 win/loss rewards with action masking.
+The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 153-dim float32 observation space, shaped rewards (hp/fainted/status/victory), and action masking.
 
 Env stack: `Gen1Env → SingleAgentWrapper → SB3Wrapper → DummyVecEnv → MaskablePPO`
 

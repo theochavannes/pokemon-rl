@@ -94,15 +94,14 @@ class OpponentSwapCallback(BaseCallback):
 
 def _find_seed(run: RunManager) -> str:
     """Find the best model to seed self-play from (within this run or globally)."""
-    for candidate in [
-        str(Path(run.models_dir) / "phase_B_final"),
-        str(Path(run.models_dir) / "best_model"),
-    ]:
-        if Path(candidate + ".zip").exists():
-            return candidate
-    # Fallback: search all runs for phase_B_final or best_model
+    # Check this run first: phase_C > phase_B > phase_A > best_model
+    for candidate in ["phase_C_final", "phase_B_final", "phase_A_final", "best_model"]:
+        p = Path(run.models_dir) / f"{candidate}.zip"
+        if p.exists():
+            return str(p.with_suffix(""))
+    # Fallback: search all runs (newest first)
     for run_dir in sorted(RUNS_DIR.glob("run_*"), reverse=True):
-        for candidate in ["phase_B_final", "best_model"]:
+        for candidate in ["phase_C_final", "phase_B_final", "phase_A_final", "best_model"]:
             p = run_dir / "models" / f"{candidate}.zip"
             if p.exists():
                 return str(p.with_suffix(""))
@@ -112,11 +111,23 @@ def _find_seed(run: RunManager) -> str:
 def main(run_id: str | None = None, new_run: bool = False) -> None:
     _prevent_sleep()
 
-    run = RunManager(
-        run_type="selfplay",
-        config={"total_timesteps": TOTAL_TIMESTEPS, "opponent_update_freq": OPPONENT_UPDATE_FREQ, **PPO_KWARGS},
-        new_run=new_run,
-    )
+    if run_id:
+        # Use a specific existing run
+        run_dir = RUNS_DIR / run_id
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Run {run_id} not found in {RUNS_DIR}")
+        run = RunManager(
+            run_type="selfplay",
+            config={"total_timesteps": TOTAL_TIMESTEPS, "opponent_update_freq": OPPONENT_UPDATE_FREQ, **PPO_KWARGS},
+            new_run=False,
+        )
+        run.run_dir = run_dir
+    else:
+        run = RunManager(
+            run_type="selfplay",
+            config={"total_timesteps": TOTAL_TIMESTEPS, "opponent_update_freq": OPPONENT_UPDATE_FREQ, **PPO_KWARGS},
+            new_run=new_run,
+        )
 
     os.makedirs(run.models_dir, exist_ok=True)
     os.makedirs(run.logs_dir, exist_ok=True)

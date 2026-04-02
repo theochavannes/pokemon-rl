@@ -61,14 +61,40 @@ class RunManager:
         return self.run_dir.name
 
     def latest_checkpoint(self) -> str | None:
-        """Return path to highest-step checkpoint in this run's models dir, or None."""
+        """Return path to the best available checkpoint in this run's models dir.
+
+        Priority: highest-step periodic checkpoint > best_model.
+        Returns path without .zip extension (SB3 convention).
+        """
+        models = Path(self.models_dir)
+
+        # Periodic checkpoints from CheckpointCallback (ppo_pokemon_50000_steps.zip)
         best_step, best_path = -1, None
-        for p in Path(self.models_dir).glob("ppo_pokemon_*_steps.zip"):
+        for p in models.glob("ppo_pokemon_*_steps.zip"):
             m = re.search(r"ppo_pokemon_(\d+)_steps", p.stem)
             if m and int(m.group(1)) > best_step:
                 best_step = int(m.group(1))
                 best_path = str(p.with_suffix(""))
+
+        # Fall back to best_model if no periodic checkpoint
+        if best_path is None:
+            best_model = models / "best_model.zip"
+            if best_model.exists():
+                best_path = str(best_model.with_suffix(""))
+
         return best_path
+
+    def save_progress(self, phase_name: str, timesteps: int, epsilon: float | None = None) -> None:
+        """Save resume state so interrupted runs can continue."""
+        progress = {"phase": phase_name, "timesteps": timesteps}
+        if epsilon is not None:
+            progress["epsilon"] = epsilon
+        self._update_info({"progress": progress})
+
+    def load_progress(self) -> dict:
+        """Load saved progress. Returns {} if no progress saved."""
+        info = self._read_info(self.run_dir)
+        return info.get("progress", {})
 
     def mark_complete(self) -> None:
         self._update_info({"status": "complete", "completed_at": datetime.now().isoformat()})

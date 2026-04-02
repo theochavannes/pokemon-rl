@@ -65,8 +65,15 @@ class WinRateCallback(BaseCallback):
         run_id: str = "",
         epsilon_schedule: tuple[float, float] | None = None,
         opponents: list | None = None,
+        run_manager=None,
+        phase_name: str = "",
+        selfplay_path: str | None = None,
+        selfplay_update_freq: int = 200,
     ):
         super().__init__(verbose)
+        self.selfplay_path = selfplay_path
+        self.selfplay_update_freq = selfplay_update_freq
+        self._last_selfplay_update: int = 0
         self.window = window
         self.eval_freq = eval_freq
         self.eval_freq_episodes = eval_freq_episodes
@@ -78,12 +85,15 @@ class WinRateCallback(BaseCallback):
         self.run_id = run_id
         self.epsilon_schedule = epsilon_schedule  # (start, end) or None
         self.opponents = opponents or []          # opponent player objects
+        self.run_manager = run_manager
+        self.phase_name = phase_name
         # Per-run log if provided, otherwise fall back to legacy path
         self.content_log = Path(training_log_path) if training_log_path else Path("content/training_log.md")
         self.hooks_log = Path("content/hooks.md")
 
         self._episode_rewards: deque = deque(maxlen=window)
         self._episode_lengths: deque = deque(maxlen=window)
+        self._epsilon_rewards: deque = deque(maxlen=500)  # long window for stable epsilon calc
         self._action_counts = np.zeros(10, dtype=np.int64)
         self._best_win_rate: float = 0.0
         self._last_log_step: int = 0
@@ -119,6 +129,7 @@ class WinRateCallback(BaseCallback):
                 length = info["episode"]["l"]
                 self._episode_rewards.append(reward)
                 self._episode_lengths.append(length)
+                self._epsilon_rewards.append(reward)
 
                 # Print first 10 episodes individually so user sees something early
                 if self.verbose and self._total_episodes <= 10:
@@ -126,7 +137,7 @@ class WinRateCallback(BaseCallback):
                     print(f"    battle #{self._total_episodes:>3}: {result}  ({length} turns)")
 
                     if self._total_episodes == 10:
-                        wins = sum(1 for r in self._episode_rewards if r > 0)
+                        wins = sum(1 for r in self._episode_rewards if r >= 0.5)
                         print(f"    ... first 10 battles: {wins}W/{10-wins}L — continuing silently until eval\n")
 
         # Heartbeat: show step progress between evals
@@ -135,7 +146,7 @@ class WinRateCallback(BaseCallback):
             eps = self._total_episodes
             # Don't print heartbeat if we're about to print a full eval line
             if self._total_episodes - self._last_eval_episode < self.eval_freq_episodes:
-                recent_wins = sum(1 for r in self._episode_rewards if r > 0)
+                recent_wins = sum(1 for r in self._episode_rewards if r >= 0.5)
                 recent_losses = len(self._episode_rewards) - recent_wins
                 print(f"    ... step {self.num_timesteps:>6,}  |  {eps} battles (last {len(self._episode_rewards)}: {recent_wins}W/{recent_losses}L)")
 
@@ -146,22 +157,33 @@ class WinRateCallback(BaseCallback):
             self._last_eval_episode = self._total_episodes
             self._last_log_step = self.num_timesteps
             self._evaluate()
-            # Early-stop this phase when target win rate is sustained
+            # Early-stop: only graduate when BOTH conditions are met:
+            # 1. Win rate target is sustained (2 consecutive evals)
+            # 2. If epsilon annealing is active, epsilon must have reached its end value
             if (
                 self.stop_at_win_rate is not None
                 and len(self._episode_rewards) >= self.window
             ):
-                win_rate = float(np.mean([1.0 if r > 0 else 0.0 for r in self._episode_rewards]))
-                if win_rate >= self.stop_at_win_rate:
+                # Check if epsilon has fully annealed (if applicable)
+                epsilon_done = True
+                if self.epsilon_schedule and self.opponents:
+                    _, eps_end = self.epsilon_schedule
+                    if hasattr(self.opponents[0], "epsilon"):
+                        epsilon_done = self.opponents[0].epsilon <= eps_end + 0.01
+                        if not epsilon_done and self.verbose and not hasattr(self, "_eps_warned"):
+                            current_eps = self.opponents[0].epsilon
+                            print(f"  [Curriculum] epsilon still at {current_eps:.2f} — phase won't end until epsilon reaches {eps_end:.2f}")
+                            self._eps_warned = True
+
+                win_rate = float(np.mean([1.0 if r >= 0.5 else 0.0 for r in self._episode_rewards]))
+                if win_rate >= self.stop_at_win_rate and epsilon_done:
                     if not self._target_hit_once:
-                        # First time hitting target — flag it, require one more eval to confirm
                         self._target_hit_once = True
                         if self.verbose:
-                            print(f"  [Target hit] win rate {win_rate:.3f} >= {self.stop_at_win_rate} — confirming on next eval...")
+                            print(f"  [Target hit] win rate {win_rate:.3f} >= {self.stop_at_win_rate} at epsilon 0.0 — confirming...")
                     else:
-                        # Sustained across 2 consecutive evals
                         if self.verbose:
-                            print(f"  [Phase complete] win rate {win_rate:.3f} >= {self.stop_at_win_rate} sustained — advancing")
+                            print(f"  [Phase complete] win rate {win_rate:.3f} >= {self.stop_at_win_rate} at full difficulty — advancing")
                         return False
                 else:
                     self._target_hit_once = False
@@ -169,7 +191,7 @@ class WinRateCallback(BaseCallback):
         return True
 
     def _evaluate(self) -> None:
-        win_rate = float(np.mean([1.0 if r > 0 else 0.0 for r in self._episode_rewards]))
+        win_rate = float(np.mean([1.0 if r >= 0.5 else 0.0 for r in self._episode_rewards]))
         avg_length = float(np.mean(self._episode_lengths)) if self._episode_lengths else 0.0
         n = len(self._episode_rewards)
         total_actions = self._action_counts.sum()
@@ -201,13 +223,36 @@ class WinRateCallback(BaseCallback):
                 f"({n} eps){eps_str}"
             )
 
-        # Save best model
+        # Update frozen self-play opponent periodically
+        if (
+            self.selfplay_path
+            and self._total_episodes - self._last_selfplay_update >= self.selfplay_update_freq
+        ):
+            self._last_selfplay_update = self._total_episodes
+            self.model.save(self.selfplay_path)
+            for opp in self.opponents:
+                if hasattr(opp, "swap_model"):
+                    opp.swap_model(self.selfplay_path)
+            if self.verbose:
+                print(f"  [SelfPlay] Frozen opponent updated (step {self.num_timesteps})")
+
+        # Save best model -- keep timestamped copy + symlink-style "best_model"
         if win_rate > self._best_win_rate and n >= self.window // 2:
             self._best_win_rate = win_rate
             os.makedirs(self.save_path, exist_ok=True)
+            # Timestamped snapshot (never overwritten)
+            wr_tag = f"{win_rate:.3f}".replace(".", "")
+            snapshot_name = f"best_wr{wr_tag}_step{self.num_timesteps}"
+            self.model.save(os.path.join(self.save_path, snapshot_name))
+            # Latest best (always points to the current best, for easy loading)
             self.model.save(os.path.join(self.save_path, "best_model"))
             if self.verbose:
-                print(f"[WinRate] New best {win_rate:.3f} — saved best_model")
+                print(f"[WinRate] New best {win_rate:.3f} — saved {snapshot_name}")
+
+        # Save progress for resume
+        if self.run_manager and self.phase_name:
+            eps = self.opponents[0].epsilon if self.opponents and hasattr(self.opponents[0], "epsilon") else None
+            self.run_manager.save_progress(self.phase_name, self.num_timesteps, eps)
 
         # Write checkpoint metadata so tournament scripts know each model's win rate
         self._write_checkpoint_metadata(win_rate, avg_length)
@@ -321,25 +366,35 @@ class WinRateCallback(BaseCallback):
             json.dump(registry, f, indent=2)
 
     def _maybe_anneal_epsilon(self, win_rate: float) -> None:
-        """Decrease opponent epsilon when agent is winning enough."""
+        """Set opponent epsilon as a continuous function of win rate.
+
+        epsilon = 1.0 - win_rate (clamped to [eps_end, eps_start])
+        Win 30% → epsilon 0.70 (mostly random)
+        Win 80% → epsilon 0.20 (mostly strategic)
+        No thresholds, no triggers — perfectly smooth.
+        """
         if not self.epsilon_schedule or not self.opponents:
             return
         eps_start, eps_end = self.epsilon_schedule
         if not hasattr(self.opponents[0], "epsilon"):
             return
-
-        current_eps = self.opponents[0].epsilon
-        if current_eps <= eps_end:
+        if len(self._epsilon_rewards) < 500:
             return
 
-        # When win rate > 60%, step epsilon down by 0.1
-        # This is self-regulating: harder opponent → win rate drops → no more annealing
-        if win_rate >= 0.60 and len(self._episode_rewards) >= self.window:
-            new_eps = max(current_eps - 0.1, eps_end)
+        eps_win_rate = float(np.mean([1.0 if r >= 0.5 else 0.0 for r in self._epsilon_rewards]))
+        target_eps = max(min(1.0 - eps_win_rate, eps_start), eps_end)
+        current_eps = self.opponents[0].epsilon
+
+        # Clamp: epsilon can drop at most 0.03 per eval to prevent sudden difficulty spikes
+        new_eps = max(target_eps, current_eps - 0.03)
+        # But can always go back up if agent is struggling
+        new_eps = min(new_eps, max(target_eps, current_eps + 0.05))
+
+        if abs(new_eps - current_eps) > 0.005:
             for opp in self.opponents:
                 opp.epsilon = new_eps
             if self.verbose:
-                print(f"  [Curriculum] opponent epsilon: {current_eps:.2f} → {new_eps:.2f} (win rate {win_rate:.2f} >= 0.60)")
+                print(f"  [Curriculum] opponent epsilon: {current_eps:.2f} → {new_eps:.2f} (wr500={eps_win_rate:.2f})")
 
     def _nearest_milestone(self) -> int | None:
         for m in _REPLAY_MILESTONES:
