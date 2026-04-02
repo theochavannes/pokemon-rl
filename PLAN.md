@@ -41,7 +41,7 @@ Server runs on port 8000 by default. poke-env connects to `ws://localhost:8000/s
 - [x] git repo initialized
 
 **Remaining Phase 1 task:**
-- [ ] Write `scripts/verify_setup.py` — start Showdown, connect two RandomPlayers, run 1 battle, confirm it completes
+- [x] Write `scripts/verify_setup.py` — start Showdown, connect two RandomPlayers, run 1 battle, confirm it completes
 
 ---
 
@@ -82,18 +82,20 @@ For own team (6 slots × 2 dims = 12 dims):
   - HP fraction (1)
   - Fainted? (1)
 
-For opponent team (6 slots × 2 dims = 12 dims):
+For opponent team (6 slots × 3 dims = 18 dims):
   - HP fraction if revealed, else -1 (1)
   - Fainted? (1)
+  - Revealed? (1)  ← explicit flag; distinguishes "not seen yet" from "fainted"
 
 Speed context (1 dim):
   - Own active speed > opponent active speed? (binary, 1)
 ```
 
-Total: ~58 dims. Keep it simple for Phase 2, can expand later.
+Total: 64 dims. The `revealed` flag per opponent slot is intentional — partial observability
+(not knowing the opponent's team) is a core strategic signal in Gen 1.
 
 #### `describe_embedding() -> ObsType`
-Return a gymnasium `Box` space with shape `(58,)`, dtype float32, low=-1, high=1.
+Return a gymnasium `Box` space with shape `(64,)`, dtype float32, low=-1, high=1.
 
 #### Action masking
 poke-env's `SinglesEnv` provides `action_masks()` automatically — verify it works for Gen 1.
@@ -124,14 +126,19 @@ from poke_env.player import RandomPlayer
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
-# Create N parallel envs, each vs RandomPlayer opponent
+# Each subprocess gets unique usernames: PPOAgent_0..3 + RandomOpponent_0..3
+# Each subprocess runs its own asyncio event loop
 # Train MaskablePPO for ~500k steps
 # Evaluate every 50k steps vs RandomPlayer and MaxDamagePlayer
 # Save checkpoints to models/
 ```
 
+**VecEnv strategy:** Use `DummyVecEnv` (N=1) during Phase 2 development for easy debugging.
+Switch to `SubprocVecEnv` (N=4) in Phase 4. Each subprocess needs unique bot usernames and
+its own asyncio event loop — poke-env 0.13 supports this.
+
 Config to expose (argparse or simple constants at top of file):
-- `N_ENVS = 4` — parallel environments
+- `N_ENVS = 4` — parallel environments (SubprocVecEnv in Phase 4)
 - `TOTAL_TIMESTEPS = 500_000`
 - `EVAL_FREQ = 50_000`
 - `BATTLE_FORMAT = "gen1randombattle"`
