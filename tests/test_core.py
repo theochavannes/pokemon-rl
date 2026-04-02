@@ -152,7 +152,7 @@ class TestEmbedBattle:
         # Move section starts at index 16 (after own active), 20 dims total
         move_start = 16
         for i in range(20):
-            assert obs[move_start + i] == 0.0, f"Empty move slot should be 0.0"
+            assert obs[move_start + i] == 0.0, "Empty move slot should be 0.0"
 
     def test_various_team_sizes(self):
         """Test with different team sizes to make sure padding works."""
