@@ -2,19 +2,44 @@ __pycache__/
 *.pyc
 .env
 
+# IDE / Editor
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
+
+# Python build
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Model checkpoints (safety net)
+*.pt
+*.pth
+*.onnx
+*.pkl
+
+# Logs
+*.log
+
+# ML experiment tracking
+wandb/
+
 # Legacy top-level dirs (kept for backwards compat, new runs go to runs/)
 logs/
 models/
 
-# Run outputs — keep metadata, ignore large binary/replay data
-runs/*/models/
-runs/*/logs/
-runs/*/replays/
+# Run outputs — ignore everything (metadata not worth tracking)
+runs/
 
-# Curated replays committed manually
-replays/*
-!replays/notable/
+# Replays — all generated artifacts
+replays/
 
 # Internal
 .claude/
 src/replays/
+
+# Meta-prompts
+IMPROVEMENT_PROMPT.md
