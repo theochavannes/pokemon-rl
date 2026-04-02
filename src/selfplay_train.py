@@ -28,6 +28,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 
 from src.callbacks import WinRateCallback
 from src.env.gen1_env import make_env
+from src.obs_transfer import load_with_expanded_obs, is_compatible
 from src.run_manager import RunManager, RUNS_DIR
 
 # ---------------------------------------------------------------------------
@@ -147,11 +148,20 @@ def main(run_id: str | None = None, new_run: bool = False) -> None:
     ]
     env = DummyVecEnv(env_fns)
 
-    model = MaskablePPO.load(
-        seed_path,
-        env=env,
-        **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
-    )
+    current_obs_dim = env.observation_space.shape[0]
+    if is_compatible(seed_path, current_obs_dim):
+        model = MaskablePPO.load(
+            seed_path, env=env,
+            **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
+        )
+    else:
+        print(f"  Obs space changed — transferring weights from {seed_path}")
+        model = load_with_expanded_obs(
+            old_path=seed_path,
+            new_obs_dim=current_obs_dim,
+            env=env,
+            ppo_kwargs={**PPO_KWARGS, "tensorboard_log": run.logs_dir},
+        )
     model.tensorboard_log = run.logs_dir
     model.verbose = 0
 
