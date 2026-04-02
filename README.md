@@ -163,27 +163,30 @@ pokemon_rl/
 
 ---
 
-## Observation Space (127 dims)
+## Observation Space (139 dims)
 
 ```
-Own active        16 dims   HP, 6 boosts (incl accuracy/evasion), status, active,
-                            fainted, type_1, type_2, base_atk, base_def, base_spa, base_spe
-Own moves         16 dims   4 moves × (base_power, type, PP, effectiveness vs opponent)
-Own bench         36 dims   6 slots × (HP, fainted, type_1, type_2, status, base_spe)
+Own active        16 dims   HP, 6 boosts (incl accuracy/evasion), status, active, fainted,
+                            type_1, type_2, base_atk, base_def, base_spa, base_spe*
+Own moves         20 dims   4 moves × 5 features (base_power, type, PP, effectiveness, accuracy)
+Own bench         36 dims   6 slots × (HP, fainted, type_1, type_2, status, base_spe*)
 Opponent active   15 dims   HP, 6 boosts (incl accuracy/evasion), status, fainted,
-                            type_1, type_2, base_atk, base_def, base_spa, base_spe
+                            type_1, type_2, base_atk, base_def, base_spa, base_spe*
 Opponent bench    30 dims   6 slots × (HP, fainted, revealed, type_1, type_2)
-Opp revealed mvs  14 dims   up to 2 seen opponent moves × 4 features + 6 reserved zeros
+Opp revealed mvs  20 dims   up to 4 seen opponent moves × 5 features (padded)
+Trapping           2 dims   own_trapped, own_maybe_trapped (Wrap/Bind flags)
 ```
+`* base_spe is paralysis-adjusted — PAR quarters speed in Gen 1 independently of stage boosts`
 
 Key design decisions:
-- **Base stats included** — in gen1randombattle all Pokemon are level 100 with maxed DVs, so stats are fully deterministic from species. The agent can reason about damage output, damage taken, and speed tiers exactly as a human player would
-- **Both sides get all 6 boosts** — accuracy and evasion included; Double Team / Sand-Attack are real Gen 1 strategies and the agent needs to track them for both sides
-- **Own bench includes status** — agent knows if its switch-in is asleep or paralyzed before committing
-- **Own bench includes Speed** — critical for evaluating which switch-in moves first
-- **Opponent bench includes types when revealed** — agent can plan defensive switches in advance
-- **Move features, not slot positions** — agent learns from base_power/type/PP/effectiveness so teams changing every battle is fine
-- **Unrevealed opponent slots** = `(-1, 0, 0, 0, 0)` — distinct from fainted `(0, 1, 0, 0, 0)`, learnable signal
+- **Base stats included** — all Pokemon are level 100 with maxed DVs in randombattle, so stats are fully deterministic from species. Agent reasons about damage and speed tiers exactly as a human would
+- **Paralysis speed correction** — `boosts["spe"]` only captures stage changes; PAR's 0.25× speed penalty is applied directly to the speed value so the agent sees the real effective speed
+- **Move accuracy included** — distinguishes Thunder (70%) from Thunderbolt (100%), Fire Blast from Flamethrower
+- **Both sides get all 6 boosts** — accuracy + evasion included; Double Team / Sand-Attack are real Gen 1 strategies
+- **Own bench status** — agent knows if its switch-in is asleep or paralyzed before committing
+- **Trapping flags** — Wrap/Bind/Fire Spin lock the opponent; agent knows when it cannot switch
+- **Up to 4 opponent revealed moves** — memory of what the opponent has used, with threat level vs current active
+- **Unrevealed opponent slots** = `(-1, 0, 0, 0, 0)` — distinct signal from fainted `(0, 1, 0, 0, 0)`
 
 Reward: `+1.0` win · `-1.0` loss · `0.0` ongoing (sparse terminal reward)
 
