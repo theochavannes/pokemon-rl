@@ -69,36 +69,66 @@ python scripts/verify_setup.py
 
 ## Training
 
-The training pipeline is a curriculum — the agent faces progressively stronger opponents and auto-advances when it reaches the win rate target for each phase.
+The training pipeline is a three-phase curriculum. Each phase auto-advances when the win rate target is reached.
 
-**Phase A → B (RandomPlayer → MaxDamagePlayer)**
+### Phases
+
+| Phase | Script | Opponent | Win rate target | What the agent learns |
+|---|---|---|---|---|
+| A | `train.py` | RandomPlayer | 75% | Basic move selection, type advantages |
+| B | `train.py` | MaxDamagePlayer | 65% | Defensive switching, not just attacking |
+| C | `selfplay_train.py` | Frozen self-snapshots | — | Prediction, long-term strategy |
+
+Phases A and B run sequentially from one command. Phase C is launched separately after B completes.
+
+---
+
+### Run management
+
+Every training session creates an isolated folder: `runs/run_001/`, `runs/run_002/`, etc. Experiments never overwrite each other.
+
+**Default — auto-resume an interrupted run:**
 ```bash
 python src/train.py
 ```
-- Phase A: trains vs RandomPlayer until 75% win rate (cap 150k steps)
-- Phase B: trains vs MaxDamagePlayer until 65% win rate (cap 200k steps)
-- Checkpoints saved every 50k steps to `models/`
-- Clean per-step output: `step 20,000 │ vs MaxDamage:  61.0%  [████████████░░░░░░░░]`
+If a previous run was killed mid-training, this resumes it from the last checkpoint automatically.
 
-**Phase C (Self-play)**
+**Force a brand new experiment** (new hyperparameters, fresh start):
 ```bash
-python src/selfplay_train.py
+python src/train.py --new-run
 ```
-- Loads `phase_B_final.zip` as seed for both sides
-- Frozen opponent updates every 50k steps to the latest best model
-- Opponent hot-swapped without rebuilding the environment
+Creates the next `runs/run_NNN/` and starts from scratch. The old run is untouched.
 
-**Battle simulation — compare any two agents**
+**Self-play after curriculum:**
+```bash
+python src/selfplay_train.py              # auto-detects latest completed curriculum run
+python src/selfplay_train.py --run run_001  # continue a specific run
+python src/selfplay_train.py --new-run    # fresh self-play experiment
+```
+
+Each run folder contains:
+```
+runs/run_001/
+  models/          checkpoints (gitignored)
+  logs/            TensorBoard data (gitignored)
+  replays/         battle replays for this run (gitignored)
+  training_log.md  win rate table per 10k steps (committed)
+  run_info.json    hyperparameters + status (committed)
+```
+
+---
+
+### Battle simulation
 ```bash
 python scripts/battle_sim.py --agent1 best_model --agent2 maxdamage --n 50
-python scripts/battle_sim.py --agent1 phase_A_final --agent2 selfplay_final --n 30
+python scripts/battle_sim.py --agent1 runs/run_001/models/phase_A_final --agent2 runs/run_002/models/phase_B_final --n 30
 python scripts/battle_sim.py --agent1 random --agent2 best_model --n 20
 ```
-Accepts: `"random"`, `"maxdamage"`, or any model name/path.
+`--agent1/--agent2` accept: `"random"`, `"maxdamage"`, or any path to a model checkpoint.
 
 **TensorBoard**
 ```bash
-tensorboard --logdir logs/
+tensorboard --logdir runs/run_001/logs/
 ```
 
 ---
@@ -133,18 +163,27 @@ pokemon_rl/
 
 ---
 
-## Observation Space (64 dims)
+## Observation Space (127 dims)
 
 ```
-Own active Pokemon     10 dims   HP, 6 boosts, status, active flag, fainted
-Own moves              16 dims   4 moves × (base_power, type, PP, effectiveness)
-Opponent active         7 dims   HP, 4 boosts, status, fainted
-Own bench              12 dims   6 slots × (HP, fainted)
-Opponent bench         18 dims   6 slots × (HP, fainted, revealed)
-Speed context           1 dim    own_speed > opp_speed?
+Own active        16 dims   HP, 6 boosts (incl accuracy/evasion), status, active,
+                            fainted, type_1, type_2, base_atk, base_def, base_spa, base_spe
+Own moves         16 dims   4 moves × (base_power, type, PP, effectiveness vs opponent)
+Own bench         36 dims   6 slots × (HP, fainted, type_1, type_2, status, base_spe)
+Opponent active   15 dims   HP, 6 boosts (incl accuracy/evasion), status, fainted,
+                            type_1, type_2, base_atk, base_def, base_spa, base_spe
+Opponent bench    30 dims   6 slots × (HP, fainted, revealed, type_1, type_2)
+Opp revealed mvs  14 dims   up to 2 seen opponent moves × 4 features + 6 reserved zeros
 ```
 
-The agent learns from **move features, not slot positions** — base power, type, PP fraction, and type effectiveness vs the current opponent. In random battles where teams change every match, the agent must generalize from features rather than memorizing move slots.
+Key design decisions:
+- **Base stats included** — in gen1randombattle all Pokemon are level 100 with maxed DVs, so stats are fully deterministic from species. The agent can reason about damage output, damage taken, and speed tiers exactly as a human player would
+- **Both sides get all 6 boosts** — accuracy and evasion included; Double Team / Sand-Attack are real Gen 1 strategies and the agent needs to track them for both sides
+- **Own bench includes status** — agent knows if its switch-in is asleep or paralyzed before committing
+- **Own bench includes Speed** — critical for evaluating which switch-in moves first
+- **Opponent bench includes types when revealed** — agent can plan defensive switches in advance
+- **Move features, not slot positions** — agent learns from base_power/type/PP/effectiveness so teams changing every battle is fine
+- **Unrevealed opponent slots** = `(-1, 0, 0, 0, 0)` — distinct from fainted `(0, 1, 0, 0, 0)`, learnable signal
 
 Reward: `+1.0` win · `-1.0` loss · `0.0` ongoing (sparse terminal reward)
 

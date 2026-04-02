@@ -79,15 +79,58 @@ def _move_features(move, opponent) -> list:
     return [base_power, type_index, pp_fraction, effectiveness]
 
 
+_STAT_SCALE = 255.0  # Gen 1 max base stat (Mewtwo Special 154, HP 255 for Chansey — safe ceiling)
+
+
+def _types(pokemon) -> list:
+    """Two type floats: PokemonType.value / 18.0, or 0.0 if monotype / unknown."""
+    t1 = pokemon.type_1.value / 18.0 if pokemon.type_1 else 0.0
+    t2 = pokemon.type_2.value / 18.0 if pokemon.type_2 else 0.0
+    return [t1, t2]
+
+
+def _base_stats(pokemon) -> list:
+    """Normalized base Attack, Defense, Special, Speed — deterministic from species at L100."""
+    bs = pokemon.base_stats
+    return [
+        bs.get("atk", 0) / _STAT_SCALE,
+        bs.get("def", 0) / _STAT_SCALE,
+        bs.get("spa", 0) / _STAT_SCALE,   # Gen 1 Special (same for SpAtk and SpDef)
+        bs.get("spe", 0) / _STAT_SCALE,
+    ]
+
+
 def embed_battle(battle) -> np.ndarray:
     """
-    Standalone embedding function — usable outside Gen1Env (e.g. by FrozenPolicyPlayer).
-    Produces a 64-dim float32 observation from a poke-env Battle object.
+    Produces a 127-dim float32 observation from a poke-env Battle object.
+
+    In gen1randombattle all Pokemon are level 100 with maxed DVs and stat experience,
+    so base stats are fully deterministic from species — including them lets the agent
+    reason about damage ranges, speed tiers, and switch-in matchups.
+
+    Observation breakdown (127 dims total):
+      Own active        16  HP, 6 boosts (incl acc/eva), status, active, fainted,
+                            type_1, type_2, base_atk, base_def, base_spa, base_spe
+      Own moves         16  4 moves × (base_power, type, PP, effectiveness vs opp)
+      Own bench         36  6 slots × (HP, fainted, type_1, type_2, status, base_spe)
+      Opp active        15  HP, 6 boosts (incl acc/eva), status, fainted,
+                            type_1, type_2, base_atk, base_def, base_spa, base_spe
+      Opp bench         30  6 slots × (HP, fainted, revealed, type_1, type_2)
+                            unrevealed = [-1, 0, 0, 0, 0]
+      Opp revealed mvs  14  up to 2 seen opp moves × 4 features + 6 reserved zeros
+
+    Stat boosts (own + opp) both include accuracy and evasion — Double Team /
+    Sand-Attack are real strategies in Gen 1 and the agent needs to track them
+    for both sides.
+
+    Status on own bench is encoded so the agent knows if its switch-in is asleep
+    or paralyzed before committing to the switch.
     """
     obs = []
     own = battle.active_pokemon
     opp = battle.opponent_active_pokemon
 
+    # --- Own active Pokemon (16 dims) ---
     obs.append(_hp(own))
     obs.append(_boost(own.boosts, "atk"))
     obs.append(_boost(own.boosts, "def"))
@@ -96,48 +139,73 @@ def embed_battle(battle) -> np.ndarray:
     obs.append(_boost(own.boosts, "accuracy"))
     obs.append(_boost(own.boosts, "evasion"))
     obs.append(_status(own))
-    obs.append(1.0)
+    obs.append(1.0)                            # is_active placeholder
     obs.append(1.0 if own.fainted else 0.0)
+    obs.extend(_types(own))
+    obs.extend(_base_stats(own))
 
+    # --- Own moves (4 × 4 = 16 dims) ---
     moves = list(own.moves.values())[:4]
     for move in moves:
         obs.extend(_move_features(move, opp))
     for _ in range(4 - len(moves)):
         obs.extend([0.0, 0.0, 0.0, 0.0])
 
-    obs.append(_hp(opp))
-    obs.append(_boost(opp.boosts, "atk"))
-    obs.append(_boost(opp.boosts, "def"))
-    obs.append(_boost(opp.boosts, "spe"))
-    obs.append(_boost(opp.boosts, "spa"))
-    obs.append(_status(opp))
-    obs.append(1.0 if opp.fainted else 0.0)
-
+    # --- Own bench (6 × 6 = 36 dims) ---
+    # Types + status so agent can pick a switch-in that resists the current threat
+    # and isn't already crippled. base_spe for speed tier awareness.
     own_team = list(battle.team.values())
     for i in range(6):
         if i < len(own_team):
             mon = own_team[i]
             obs.append(_hp(mon))
             obs.append(1.0 if mon.fainted else 0.0)
+            obs.extend(_types(mon))
+            obs.append(_status(mon))
+            obs.append(mon.base_stats.get("spe", 0) / _STAT_SCALE)
         else:
-            obs.extend([0.0, 0.0])
+            obs.extend([0.0] * 6)
 
+    # --- Opponent active Pokemon (15 dims) ---
+    # Full 6 boosts (acc+eva included) — Double Team abuse is a real Gen 1 threat.
+    # Base stats always available once the Pokemon is on the field.
+    obs.append(_hp(opp))
+    obs.append(_boost(opp.boosts, "atk"))
+    obs.append(_boost(opp.boosts, "def"))
+    obs.append(_boost(opp.boosts, "spe"))
+    obs.append(_boost(opp.boosts, "spa"))
+    obs.append(_boost(opp.boosts, "accuracy"))
+    obs.append(_boost(opp.boosts, "evasion"))
+    obs.append(_status(opp))
+    obs.append(1.0 if opp.fainted else 0.0)
+    obs.extend(_types(opp))
+    obs.extend(_base_stats(opp))
+
+    # --- Opponent bench (6 × 5 = 30 dims) ---
+    # unrevealed = [-1, 0, 0, 0, 0] — distinct from fainted (0, 1, 0, 0, 0)
+    # types are 0 until the Pokemon is revealed (switched in)
     opp_team = list(battle.opponent_team.values())
     for i in range(6):
         if i < len(opp_team):
             mon = opp_team[i]
             obs.append(_hp(mon))
             obs.append(1.0 if mon.fainted else 0.0)
-            obs.append(1.0)
+            obs.append(1.0)                    # revealed = True
+            obs.extend(_types(mon))
         else:
-            obs.extend([-1.0, 0.0, 0.0])
+            obs.extend([-1.0, 0.0, 0.0, 0.0, 0.0])
 
-    own_speed = own.base_stats.get("spe", 0)
-    opp_speed = opp.base_stats.get("spe", 0) if opp else 0
-    obs.append(1.0 if own_speed > opp_speed else 0.0)
+    # --- Opponent revealed moves (up to 2 × 4 = 8 dims + 6 reserved = 14 dims) ---
+    # effectiveness calculated vs own active so agent knows the threat level
+    opp_revealed = list(opp.moves.values())[:2] if opp else []
+    for move in opp_revealed:
+        obs.extend(_move_features(move, own))
+    for _ in range(2 - len(opp_revealed)):
+        obs.extend([0.0, 0.0, 0.0, 0.0])
+    obs.extend([0.0] * 6)                      # reserved for future expansion
 
     result = np.array(obs, dtype=np.float32)
-    assert result.shape == (64,), f"Obs shape mismatch: expected (64,), got {result.shape}"
+    assert result.shape == (127,), f"Obs shape mismatch: expected (127,), got {result.shape}"
     return result
 
 
@@ -145,15 +213,15 @@ class Gen1Env(SinglesEnv):
     """
     Gen 1 random battle environment for MaskablePPO.
 
-    Observation breakdown (64 dims total):
-      Own active Pokemon    : 10 dims  (HP, 6 boosts, status, is_active placeholder, fainted)
-      Own moves             : 16 dims  (4 moves × 4 features)
-      Opponent active       :  7 dims  (HP, 4 boosts, status, fainted)
-      Own bench             : 12 dims  (6 slots × HP + fainted)
-      Opponent bench        : 18 dims  (6 slots × HP + fainted + revealed)
-      Speed context         :  1 dim   (own_speed > opp_speed)
-
-    Phase 6 expansions: add bench Pokemon types, explicit type-chart encoding.
+    Observation breakdown (127 dims total):
+      Own active        : 16 dims  HP, 6 boosts (incl acc/eva), status, active, fainted,
+                                   type_1, type_2, base_atk, base_def, base_spa, base_spe
+      Own moves         : 16 dims  4 moves × (base_power, type, PP, effectiveness vs opp)
+      Own bench         : 36 dims  6 slots × (HP, fainted, type_1, type_2, status, base_spe)
+      Opp active        : 15 dims  HP, 6 boosts (incl acc/eva), status, fainted,
+                                   type_1, type_2, base_atk, base_def, base_spa, base_spe
+      Opp bench         : 30 dims  6 slots × (HP, fainted, revealed, type_1, type_2)
+      Opp revealed mvs  : 14 dims  up to 2 seen opp moves × 4 features + 6 reserved
     """
 
     def __init__(self, **kwargs):
@@ -176,7 +244,7 @@ class Gen1Env(SinglesEnv):
         return embed_battle(battle)
 
     def describe_embedding(self):
-        return Box(low=-1.0, high=1.0, shape=(64,), dtype=np.float32)
+        return Box(low=-1.0, high=1.0, shape=(127,), dtype=np.float32)
 
 
 class SB3Wrapper(gymnasium.Wrapper):
