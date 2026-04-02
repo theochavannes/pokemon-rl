@@ -38,7 +38,32 @@ ENVIRONMENT OK — win rate above 80% threshold.
 **Why it matters:** Confirms the environment is working correctly end-to-end. 99% also sets a brutal bar for the RL agent — beating a type-aware heuristic >60% will require genuinely strategic play. The 1 loss is likely a catastrophic type matchup (e.g. Random got lucky team composition).
 
 ## Phase 4 — PPO Training
-*(pending)*
+
+### ✅ First PPO gradient update (2026-04-02)
+**What happened:**
+```
+Using cuda device
+----------------------------
+| time/              |     |
+|    fps             | 77  |
+|    iterations      | 1   |
+|    total_timesteps | 128 |
+----------------------------
+------------------------------------------
+| train/                  |              |
+|    approx_kl            | 0.0035618674 |
+|    clip_fraction        | 0            |
+|    clip_range           | 0.2          |
+|    entropy_loss         | -1.77        |
+|    explained_variance   | -1.34        |
+|    learning_rate        | 0.0003       |
+|    loss                 | 0.0103       |
+|    n_updates            | 10           |
+|    policy_gradient_loss | -0.0128      |
+|    value_loss           | 0.128        |
+Smoke test PASSED
+```
+**Why it matters:** The agent is alive and learning on GPU. `explained_variance = -1.34` is exactly right for a fresh policy — the critic has no idea what's happening yet. This is the "it's learning" moment for Act 3 of the video. Contrast this number against the same metric after 500k steps.
 
 ## Phase 5 — Self-Play
 *(pending)*

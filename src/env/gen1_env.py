@@ -94,9 +94,17 @@ class Gen1Env(SinglesEnv):
     Phase 6 expansions: add bench Pokemon types, explicit type-chart encoding.
     """
 
-    def calc_reward(self, last_battle, current_battle) -> float:
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # PokeEnv.__init__ does not set observation_spaces — must be set by subclass.
+        # __setattr__ intercepts this and wraps each value in Dict(observation, action_mask).
+        self.observation_spaces = {
+            agent: self.describe_embedding() for agent in self.possible_agents
+        }
+
+    def calc_reward(self, battle) -> float:
         return self.reward_computing_helper(
-            current_battle,
+            battle,
             fainted_value=0.0,
             hp_value=0.0,
             victory_value=1.0,
@@ -205,23 +213,29 @@ def make_env(env_index: int = 0, battle_format: str = "gen1randombattle") -> SB3
     Factory function for creating a single SB3-compatible Gen 1 environment.
 
     Each env gets unique usernames to allow parallel instances without conflicts.
+    A random 6-char suffix is appended so reconnecting after a crash never
+    collides with a leftover battle on the Showdown server.
+
     The opponent player is a puppet (start_listening=False) — it provides move
     choices but has no WebSocket connection; the battle is injected directly.
 
     Use with functools.partial for SubprocVecEnv (lambdas are not picklable):
         envs = SubprocVecEnv([partial(make_env, i) for i in range(N_ENVS)])
     """
+    import random
+    import string
     from poke_env.player.baselines import RandomPlayer
 
+    suffix = "".join(random.choices(string.ascii_lowercase, k=6))
     inner = Gen1Env(
-        account_configuration1=AccountConfiguration(f"PPOAgent_{env_index}", None),
-        account_configuration2=AccountConfiguration(f"RandomOpp_{env_index}", None),
+        account_configuration1=AccountConfiguration(f"PPOAgent{env_index}{suffix}", None),
+        account_configuration2=AccountConfiguration(f"RandOpp{env_index}{suffix}", None),
         battle_format=battle_format,
         log_level=25,
     )
     opponent = RandomPlayer(
         battle_format=battle_format,
-        account_configuration=AccountConfiguration(f"RandPuppet_{env_index}", None),
+        account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
         start_listening=False,
         log_level=25,
     )

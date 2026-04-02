@@ -96,6 +96,19 @@ Full stack: `Gen1Env → SingleAgentWrapper → SB3Wrapper → DummyVecEnv → M
 
 ---
 
+## 2026-04-02 — poke-env API Corrections (found during smoke test)
+
+**Issue 1:** `observation_spaces` not set automatically.
+`PokeEnv.__init__` sets `action_spaces` but not `observation_spaces`. Subclasses must set it explicitly. Fixed by adding `__init__` to `Gen1Env` that sets `self.observation_spaces = {agent: self.describe_embedding() for agent in self.possible_agents}`.
+
+**Issue 2:** `calc_reward` signature changed in poke-env 0.13.
+Original plan used `calc_reward(self, last_battle, current_battle)`. Actual API is `calc_reward(self, battle)` — single argument. Fixed.
+
+**Issue 3:** Stale battle state on reconnect.
+If a run crashes mid-battle, the Showdown server keeps the battle alive. Reconnecting with the same username restores the battle, causing `reset_battles()` to fail on the next run. Fixed by appending a 6-char random suffix to all usernames in `make_env()`.
+
+---
+
 ## 2026-04-02 — Win Rate Tracking
 
 **Question:** How to evaluate win rate during training without a separate eval loop?
