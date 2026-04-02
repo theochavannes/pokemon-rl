@@ -13,6 +13,9 @@ Usage:
 
 import asyncio
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from poke_env.player import RandomPlayer
 
@@ -22,6 +25,7 @@ async def main() -> None:
     p2 = RandomPlayer(battle_format="gen1randombattle", log_level=25)
 
     print("Connecting to Showdown server at ws://localhost:8000 ...")
+    print("(If this hangs or errors: start the server first with 'node pokemon-showdown start --no-security')")
     print("Running 1 battle: RandomPlayer vs RandomPlayer ...")
 
     await p1.battle_against(p2, n_battles=1)

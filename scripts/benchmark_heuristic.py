@@ -10,6 +10,9 @@ Usage (Showdown server must be running first):
 
 import asyncio
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 N_BATTLES = 100
 BATTLE_FORMAT = "gen1randombattle"
