@@ -61,7 +61,7 @@ def _type_advantage(pokemon, opponent) -> float:
 
 class RandomAttackerPlayer(Player):
     def choose_move(self, battle):
-        if battle.available_moves and _random.random() < 0.85:
+        if battle.available_moves and _random.random() < 0.95:
             return self.create_order(_random.choice(battle.available_moves))
         return self.choose_random_move(battle)
 
@@ -157,8 +157,6 @@ class TypeMatchupPlayer(Player):
 # ---------------------------------------------------------------------------
 
 class StallPlayer(Player):
-    _STATUS_CATEGORIES = {"status"}
-
     def choose_move(self, battle):
         opp = battle.opponent_active_pokemon
 

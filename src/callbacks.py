@@ -227,8 +227,12 @@ class WinRateCallback(BaseCallback):
             bar = "█" * int(win_rate * 20) + "░" * (20 - int(win_rate * 20))
             label = self.phase_label or "opponent"
             eps_str = ""
-            if self.opponents and hasattr(self.opponents[0], "epsilon"):
-                eps_str = f"  opp_ε={self.opponents[0].epsilon:.2f}"
+            if self.opponents:
+                opp = self.opponents[0]
+                if hasattr(opp, "temperature"):
+                    eps_str = f"  temp={opp.temperature:.2f}"
+                elif hasattr(opp, "epsilon"):
+                    eps_str = f"  opp_ε={opp.epsilon:.2f}"
             print(
                 f"  step {self.num_timesteps:>6,} │ "
                 f"vs {label}: {win_rate*100:>5.1f}%  [{bar}]  "
@@ -396,7 +400,7 @@ class WinRateCallback(BaseCallback):
         if not self.epsilon_schedule or not self.opponents:
             return
         eps_start, eps_end = self.epsilon_schedule
-        if not hasattr(self.opponents[0], "epsilon"):
+        if not hasattr(self.opponents[0], "epsilon") and not hasattr(self.opponents[0], "temperature"):
             return
         if len(self._epsilon_rewards) < 500:
             return

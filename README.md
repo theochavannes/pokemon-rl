@@ -11,7 +11,7 @@ The agent learns through mixed-opponent training with adaptive difficulty — fa
 | Phase | Description | Status |
 |---|---|---|
 | 1 | Infrastructure — Showdown server, Python env, dependencies | Done |
-| 2 | Gen 1 Gymnasium environment (153-dim observation space) | Done |
+| 2 | Gen 1 Gymnasium environment (421-dim observation space) | Done |
 | 3 | Baseline agents — MaxDamage, TypeMatchup, Stall, AggressiveSwitcher | Done |
 | 4 | Mixed-opponent training with epsilon annealing | In progress |
 | 5 | Self-play with frozen policy snapshots | Pending |
@@ -131,7 +131,7 @@ tensorboard --logdir runs/run_001/logs/
 pokemon_rl/
 ├── showdown/               # Pokemon Showdown server (git submodule)
 ├── src/
-│   ├── env/gen1_env.py     # Gymnasium environment — 153-dim obs, shaped reward
+│   ├── env/gen1_env.py     # Gymnasium environment — 421-dim obs, shaped reward
 │   ├── agents/
 │   │   ├── heuristic_agent.py   # 4 heuristic opponents + epsilon wrappers
 │   │   └── policy_player.py     # FrozenPolicyPlayer (self-play opponent)
@@ -150,29 +150,32 @@ pokemon_rl/
 
 ---
 
-## Observation Space (153 dims)
+## Observation Space (421 dims)
+
+All Pokemon are forced to level 100 in Showdown config for training consistency — level is omitted from observations.
 
 ```
-Own active        17 dims   HP, 6 boosts (incl accuracy/evasion), status, active, fainted,
-                            type_1, type_2, level, base_atk, base_def, base_spa, base_spe*
+Own active        16 dims   HP, 6 boosts (incl accuracy/evasion), status, active, fainted,
+                            type_1, type_2, base_atk, base_def, base_spa, base_spe*
 Own moves         20 dims   4 moves x 5 features (base_power, type, PP, effectiveness, accuracy)
-Own bench         42 dims   6 slots x (HP, fainted, type_1, type_2, status, level, base_spe*)
-Opponent active   16 dims   HP, 6 boosts (incl accuracy/evasion), status, fainted,
-                            type_1, type_2, level, base_atk, base_def, base_spa, base_spe*
-Opponent bench    36 dims   6 slots x (HP, fainted, revealed, type_1, type_2, level)
-Opp revealed mvs  20 dims   up to 4 seen opponent moves x 5 features (padded)
+Own bench        174 dims   6 slots x 29 (HP, fainted, types, status, 4 base stats,
+                            4 moves x 5 features w/ effectiveness vs opponent)
+Opponent active   15 dims   HP, 6 boosts (incl accuracy/evasion), status, fainted,
+                            type_1, type_2, base_atk, base_def, base_spa, base_spe*
+Opponent bench   174 dims   6 slots x 29 (HP, fainted, revealed, types, 4 base stats,
+                            up to 4 revealed moves x 5 features w/ effectiveness vs own active)
+Opp revealed mvs  20 dims   up to 4 seen opponent active moves x 5 features (padded)
 Trapping           2 dims   own_trapped, own_maybe_trapped (Wrap/Bind flags)
 ```
 `* base_spe is paralysis-adjusted — PAR quarters speed in Gen 1 independently of stage boosts`
 
 Key design decisions:
-- **Level included** — gen1randombattle assigns varying levels (58-100) for balance; the agent sees actual level to reason about effective stats
-- **Base stats + level** — actual combat stats scale with level; providing both lets the network learn the interaction
+- **Level 100 forced** — Showdown modified to set all Pokemon to level 100, eliminating level variance
+- **Full bench info** — all 4 moves per bench Pokemon with effectiveness vs current opponent enables informed switching
 - **Paralysis speed correction** — PAR's 0.25x speed penalty applied directly to speed value
 - **Move accuracy** — distinguishes Thunder (70%) from Thunderbolt (100%)
-- **Own bench status + level** — informed switching decisions
 - **Opponent revealed moves** — memory of what the opponent has used
-- **Unrevealed opponent slots** = `(-1, 0, 0, 0, 0, 0)` — distinct from fainted `(0, 1, 0, 0, 0, 0)`
+- **Unrevealed opponent slots** start with -1.0 — distinct from fainted (0.0)
 
 ---
 
