@@ -1,8 +1,8 @@
 """
-Phase 4 — PPO training loop.
+Curriculum training: RandomPlayer → MaxDamagePlayer → self-play trigger.
 
-Trains MaskablePPO against RandomPlayer opponents.
-Target: win rate >60% vs MaxDamagePlayer before moving to self-play (Phase 5).
+Each phase runs until the win-rate target is hit OR the step cap is reached.
+After phase B, the best_model is handed off to selfplay_train.py automatically.
 
 Usage (Showdown server must be running first):
     C:/Users/theoc/miniconda3/envs/pokemon_rl/python.exe src/train.py
@@ -14,11 +14,15 @@ TensorBoard:
 import atexit
 import ctypes
 import os
+import re
 import sys
 from functools import partial
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Ensure all relative paths resolve from project root regardless of launch directory.
+_PROJECT_ROOT = Path(__file__).parent.parent
+os.chdir(_PROJECT_ROOT)
+sys.path.insert(0, str(_PROJECT_ROOT))
 
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import CheckpointCallback
@@ -32,95 +36,143 @@ from src.env.gen1_env import make_env
 # ---------------------------------------------------------------------------
 
 BATTLE_FORMAT = "gen1randombattle"
-TOTAL_TIMESTEPS = 500_000
 MODEL_DIR = "models"
 LOG_DIR = "logs"
-REPLAY_DIR = "replays/phase4"
 
-# N_ENVS=1 uses DummyVecEnv for easy debugging.
-# To scale: set N_ENVS=4 and switch to SubprocVecEnv (see comment in main()).
-# Each subprocess needs its own asyncio event loop — poke-env 0.13 supports this.
 N_ENVS = 1
 
-# PPO hyperparameters — validated by team (see content/rl_concepts/ppo_explained.md)
 PPO_KWARGS = dict(
     policy="MlpPolicy",
-    n_steps=2048,       # rollout length per env per update
-    batch_size=64,      # must divide n_steps * N_ENVS evenly
-    n_epochs=10,        # gradient steps per rollout
-    gamma=0.99,         # discount — keeps signal over ~40-move battles
-    gae_lambda=0.95,    # GAE λ — γλ=0.94 adequate for sparse terminal reward
-    clip_range=0.2,     # PPO trust region
+    n_steps=2048,
+    batch_size=64,
+    n_epochs=10,
+    gamma=0.99,
+    gae_lambda=0.95,
+    clip_range=0.2,
     learning_rate=3e-4,
-    verbose=1,
+    verbose=0,
     tensorboard_log=LOG_DIR,
 )
 
+# Curriculum: agent advances to next phase when target_wr is reached or step cap hit.
+# Phase A: vs RandomPlayer  — learns basic move selection and type advantage
+# Phase B: vs MaxDamage     — forced to learn switching, prediction, not just spamming
+# After phase B: selfplay_train.py takes over
+CURRICULUM = [
+    dict(
+        name="A",
+        opponent_type="random",
+        phase_label="Random",
+        replay_dir="replays/phase_a",
+        target_wr=0.75,
+        max_steps=150_000,
+    ),
+    dict(
+        name="B",
+        opponent_type="maxdamage",
+        phase_label="MaxDamage",
+        replay_dir="replays/phase_b",
+        target_wr=0.65,
+        max_steps=200_000,
+    ),
+]
+
 
 def _prevent_sleep() -> None:
-    """Prevent Windows from sleeping during training (ctypes, no extra deps)."""
     ES_CONTINUOUS = 0x80000000
     ES_SYSTEM_REQUIRED = 0x00000001
     ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
     atexit.register(
         lambda: ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
     )
-    print("Sleep prevention: ON (restored automatically on exit)")
+    print("Sleep prevention: ON")
+
+
+def _find_latest_checkpoint(model_dir: str) -> str | None:
+    """Return path to the highest-step checkpoint in model_dir, or None."""
+    best_step, best_path = -1, None
+    for p in Path(model_dir).glob("ppo_pokemon_*_steps.zip"):
+        m = re.search(r"ppo_pokemon_(\d+)_steps", p.stem)
+        if m and int(m.group(1)) > best_step:
+            best_step = int(m.group(1))
+            best_path = str(p)
+    return best_path
+
+
+def _build_env(phase: dict) -> DummyVecEnv:
+    os.makedirs(phase["replay_dir"], exist_ok=True)
+    env_fns = [
+        partial(
+            make_env,
+            env_index=i,
+            battle_format=BATTLE_FORMAT,
+            save_replays=phase["replay_dir"],
+            opponent_type=phase["opponent_type"],
+        )
+        for i in range(N_ENVS)
+    ]
+    return DummyVecEnv(env_fns)
 
 
 def main() -> None:
     _prevent_sleep()
-
     os.makedirs(MODEL_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
-    os.makedirs(REPLAY_DIR, exist_ok=True)
 
-    # --- Build vectorised environment (replays saved to replays/phase4/) ---
-    env_fns = [
-        partial(make_env, env_index=i, battle_format=BATTLE_FORMAT, save_replays=REPLAY_DIR)
-        for i in range(N_ENVS)
-    ]
+    resume_path = _find_latest_checkpoint(MODEL_DIR)
+    model = None
 
-    # DummyVecEnv: single process, easy to debug.
-    # SubprocVecEnv upgrade path (Phase 4 scale-up):
-    #   from stable_baselines3.common.vec_env import SubprocVecEnv
-    #   env = SubprocVecEnv(env_fns)
-    env = DummyVecEnv(env_fns)
+    for phase in CURRICULUM:
+        print(f"\n{'='*60}")
+        print(f"  Phase {phase['name']}: vs {phase['phase_label']}")
+        print(f"  Target win rate: {phase['target_wr']*100:.0f}%  |  Cap: {phase['max_steps']:,} steps")
+        print(f"{'='*60}\n")
 
-    # --- Build model ---
-    model = MaskablePPO(env=env, **PPO_KWARGS)
+        env = _build_env(phase)
 
-    # --- Callbacks ---
-    win_rate_cb = WinRateCallback(
-        window=100,
-        eval_freq=10_000,
-        save_path=MODEL_DIR,
-        replay_dir=REPLAY_DIR,
-        notable_dir="replays/notable",
-        verbose=1,
-    )
-    checkpoint_cb = CheckpointCallback(
-        save_freq=50_000,
-        save_path=MODEL_DIR,
-        name_prefix="ppo_pokemon",
-        verbose=1,
-    )
+        if model is None:
+            if resume_path:
+                print(f"  Resuming from {resume_path}")
+                model = MaskablePPO.load(
+                    resume_path,
+                    env=env,
+                    **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
+                )
+                model.verbose = 0
+            else:
+                model = MaskablePPO(env=env, **PPO_KWARGS)
+        else:
+            model.set_env(env)
 
-    # --- Train ---
-    print(f"Training MaskablePPO for {TOTAL_TIMESTEPS:,} steps ({N_ENVS} env(s))...")
-    print(f"TensorBoard: tensorboard --logdir {LOG_DIR}")
-    print(f"Replays:     {REPLAY_DIR}/")
-    print()
+        win_rate_cb = WinRateCallback(
+            window=100,
+            eval_freq=10_000,
+            save_path=MODEL_DIR,
+            replay_dir=phase["replay_dir"],
+            notable_dir="replays/notable",
+            verbose=1,
+            stop_at_win_rate=phase["target_wr"],
+            phase_label=phase["phase_label"],
+        )
+        checkpoint_cb = CheckpointCallback(
+            save_freq=50_000,
+            save_path=MODEL_DIR,
+            name_prefix="ppo_pokemon",
+            verbose=0,
+        )
 
-    model.learn(
-        total_timesteps=TOTAL_TIMESTEPS,
-        callback=[win_rate_cb, checkpoint_cb],
-        reset_num_timesteps=True,
-    )
+        model.learn(
+            total_timesteps=phase["max_steps"],
+            callback=[win_rate_cb, checkpoint_cb],
+            reset_num_timesteps=(model is None and resume_path is None),
+        )
 
-    final_path = os.path.join(MODEL_DIR, "final_model")
-    model.save(final_path)
-    print(f"\nTraining complete. Final model saved to {final_path}.zip")
+        # Save phase checkpoint so we can resume or inspect
+        phase_path = os.path.join(MODEL_DIR, f"phase_{phase['name']}_final")
+        model.save(phase_path)
+        print(f"\n  Phase {phase['name']} complete — saved {phase_path}.zip")
+
+    print("\nCurriculum complete. Run selfplay_train.py to continue with self-play.")
 
 
 if __name__ == "__main__":

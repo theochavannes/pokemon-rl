@@ -23,7 +23,7 @@ Owns poke-env, async Python, Node.js WebSocket communication, Gen 1 battle mecha
 Does not write initial features. Reviews code, points out edge cases, and asks Socratic questions to challenge assumptions. Politely aggressive. Invoke when: finishing a module, making a key architectural decision, or when something feels off.
 
 **[MEDIA] Content Director**
-Tracks the narrative arc for the YouTube video. Flags moments worth recording. Invoke at phase milestones or when the agent does something interesting/funny.
+Owns the YouTube video narrative end-to-end. Intervenes unprompted in every significant technical discussion to assess content value. Maintains `content/hooks.md` and `content/team_decisions.md` after every discussion without being asked. Does not wait to be called upon — proactively shapes what gets documented, what battles get saved, and how the story is structured for a non-expert audience.
 
 **[SE] Staff Engineer**
 Owns system-wide correctness, training stability, and the interaction between components. Thinks in invariants — what must always be true at every layer of the stack for training to be valid. Asks "what breaks silently?" before "what do we build next?"

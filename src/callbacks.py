@@ -13,6 +13,7 @@ Win rate is derived from terminal episode rewards:
     +1.0 → win   |   -1.0 → loss   (no draws in gen1randombattle)
 """
 
+import json
 import os
 import shutil
 from collections import deque
@@ -22,8 +23,9 @@ from pathlib import Path
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 
-# Win rate thresholds worth flagging as video milestones
-_WIN_RATE_MILESTONES = [0.10, 0.25, 0.40, 0.50, 0.60, 0.75]
+# Win rate thresholds worth flagging as video milestones.
+# Start at 0.55 — random-vs-random baseline is ~50%, so anything below is noise.
+_WIN_RATE_MILESTONES = [0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85]
 
 # Step milestones for replay snapshots
 _REPLAY_MILESTONES = {10_000, 50_000, 100_000, 200_000, 350_000, 500_000}
@@ -56,6 +58,8 @@ class WinRateCallback(BaseCallback):
         replay_dir: str = "replays/phase4",
         notable_dir: str = "replays/notable",
         verbose: int = 1,
+        stop_at_win_rate: float | None = None,
+        phase_label: str = "",
     ):
         super().__init__(verbose)
         self.window = window
@@ -63,6 +67,8 @@ class WinRateCallback(BaseCallback):
         self.save_path = save_path
         self.replay_dir = Path(replay_dir)
         self.notable_dir = Path(notable_dir)
+        self.stop_at_win_rate = stop_at_win_rate
+        self.phase_label = phase_label or ""
         self.content_log = Path("content/training_log.md")
         self.hooks_log = Path("content/hooks.md")
 
@@ -98,6 +104,16 @@ class WinRateCallback(BaseCallback):
         ):
             self._last_log_step = self.num_timesteps
             self._evaluate()
+            # Early-stop this phase when target win rate is reached
+            if (
+                self.stop_at_win_rate is not None
+                and len(self._episode_rewards) >= self.window // 2
+            ):
+                win_rate = float(np.mean([1.0 if r > 0 else 0.0 for r in self._episode_rewards]))
+                if win_rate >= self.stop_at_win_rate:
+                    if self.verbose:
+                        print(f"  [Phase complete] win rate {win_rate:.3f} >= {self.stop_at_win_rate} — stopping phase")
+                    return False
 
         return True
 
@@ -108,19 +124,23 @@ class WinRateCallback(BaseCallback):
         total_actions = self._action_counts.sum()
         action_pct = (self._action_counts / total_actions * 100) if total_actions > 0 else self._action_counts
 
-        # TensorBoard
+        # TensorBoard only — dump with format_strings=["tensorboard"] to suppress stdout table
         self.logger.record("train/win_rate", win_rate)
         self.logger.record("train/avg_episode_length", avg_length)
         self.logger.record("train/episodes_in_window", n)
         self.logger.record("train/switch_rate_pct", float(action_pct[:6].sum()))
         self.logger.record("train/move_rate_pct", float(action_pct[6:].sum()))
-        self.logger.dump(self.num_timesteps)
+        self.logger.dump(self.num_timesteps, excluded=("stdout", "log", "json", "csv"))
 
         if self.verbose:
+            bar = "█" * int(win_rate * 20) + "░" * (20 - int(win_rate * 20))
+            label = self.phase_label or "opponent"
             print(
-                f"[WinRate] step={self.num_timesteps:>7}  "
-                f"win={win_rate:.3f}  avg_turns={avg_length:.1f}  "
-                f"switch%={action_pct[:6].sum():.1f}  ({n} eps)"
+                f"  step {self.num_timesteps:>6,} │ "
+                f"vs {label}: {win_rate*100:>5.1f}%  [{bar}]  "
+                f"avg {avg_length:.0f} turns  "
+                f"switch {action_pct[:6].sum():.0f}%  "
+                f"({n} eps)"
             )
 
         # Save best model
@@ -130,6 +150,9 @@ class WinRateCallback(BaseCallback):
             self.model.save(os.path.join(self.save_path, "best_model"))
             if self.verbose:
                 print(f"[WinRate] New best {win_rate:.3f} — saved best_model")
+
+        # Write checkpoint metadata so tournament scripts know each model's win rate
+        self._write_checkpoint_metadata(win_rate, avg_length)
 
         # Content logging
         self._update_content_log(win_rate, avg_length, action_pct, n)
@@ -205,6 +228,37 @@ class WinRateCallback(BaseCallback):
                 f"[MEDIA]  Snapped {len(replay_files)} replays → "
                 f"replays/notable/ (step {step_label}, wr={win_rate:.3f})"
             )
+
+    def _write_checkpoint_metadata(self, win_rate: float, avg_length: float) -> None:
+        """
+        Append a metadata entry to models/checkpoint_registry.json.
+        Each entry maps a checkpoint filename → stats at the time of saving.
+        Used by tournament and comparison scripts to select agents.
+        """
+        registry_path = Path(self.save_path) / "checkpoint_registry.json"
+        registry = {}
+        if registry_path.exists():
+            with open(registry_path, "r") as f:
+                registry = json.load(f)
+
+        step = self.num_timesteps
+        # Match SB3 CheckpointCallback naming convention
+        checkpoint_name = f"ppo_pokemon_{step}_steps"
+        registry[checkpoint_name] = {
+            "step": step,
+            "win_rate": round(win_rate, 4),
+            "avg_battle_length": round(avg_length, 1),
+            "timestamp": datetime.now().isoformat(),
+            "is_best": win_rate >= self._best_win_rate,
+        }
+        # Always update best_model entry
+        registry["best_model"] = {
+            "step": step,
+            "win_rate": round(self._best_win_rate, 4),
+            "timestamp": datetime.now().isoformat(),
+        }
+        with open(registry_path, "w") as f:
+            json.dump(registry, f, indent=2)
 
     def _nearest_milestone(self) -> int | None:
         for m in _REPLAY_MILESTONES:

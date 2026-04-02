@@ -2,7 +2,7 @@
 
 Training a reinforcement learning agent to play competitive Gen 1 (RBY) Pokemon using [Pokemon Showdown](https://github.com/smogon/pokemon-showdown) as the battle simulator.
 
-The agent learns through self-play using Proximal Policy Optimization (PPO) with action masking.
+The agent learns through a curriculum — first mastering basic play against random and heuristic opponents, then improving through self-play against frozen snapshots of itself.
 
 ---
 
@@ -13,9 +13,11 @@ The agent learns through self-play using Proximal Policy Optimization (PPO) with
 | 1 | Infrastructure — Showdown server, Python env, dependencies | ✅ Done |
 | 2 | Gen 1 Gymnasium environment (64-dim observation space) | ✅ Done |
 | 3 | Baseline agents — MaxDamagePlayer 96/100 vs Random | ✅ Done |
-| 4 | PPO training loop | 🔄 In progress |
-| 5 | Self-play with policy snapshot pool | ⏳ Pending |
-| 6 | Evaluation, replay analysis, iteration | ⏳ Pending |
+| 4A | Curriculum: PPO vs RandomPlayer — peaked at 99% win rate | ✅ Done |
+| 4B | Curriculum: PPO vs MaxDamagePlayer | 🔄 In progress |
+| 5 | Self-play with frozen policy snapshots | ⏳ Pending |
+| 6 | Evaluation, replay analysis, tournament | ⏳ Pending |
+| 7 | Competitive RBY format + Gen 1 bug experiments | ⏳ Pending |
 
 ---
 
@@ -65,17 +67,38 @@ python scripts/verify_setup.py
 
 ---
 
-## Running
+## Training
 
-**Baseline benchmark** (MaxDamagePlayer vs RandomPlayer, 100 battles)
-```bash
-python scripts/benchmark_heuristic.py
-# Expected: MaxDamage wins ~96%
-```
+The training pipeline is a curriculum — the agent faces progressively stronger opponents and auto-advances when it reaches the win rate target for each phase.
 
-**Train the RL agent** *(Phase 4 — coming soon)*
+**Phase A → B (RandomPlayer → MaxDamagePlayer)**
 ```bash
 python src/train.py
+```
+- Phase A: trains vs RandomPlayer until 75% win rate (cap 150k steps)
+- Phase B: trains vs MaxDamagePlayer until 65% win rate (cap 200k steps)
+- Checkpoints saved every 50k steps to `models/`
+- Clean per-step output: `step 20,000 │ vs MaxDamage:  61.0%  [████████████░░░░░░░░]`
+
+**Phase C (Self-play)**
+```bash
+python src/selfplay_train.py
+```
+- Loads `phase_B_final.zip` as seed for both sides
+- Frozen opponent updates every 50k steps to the latest best model
+- Opponent hot-swapped without rebuilding the environment
+
+**Battle simulation — compare any two agents**
+```bash
+python scripts/battle_sim.py --agent1 best_model --agent2 maxdamage --n 50
+python scripts/battle_sim.py --agent1 phase_A_final --agent2 selfplay_final --n 30
+python scripts/battle_sim.py --agent1 random --agent2 best_model --n 20
+```
+Accepts: `"random"`, `"maxdamage"`, or any model name/path.
+
+**TensorBoard**
+```bash
+tensorboard --logdir logs/
 ```
 
 ---
@@ -88,18 +111,24 @@ pokemon_rl/
 ├── src/
 │   ├── env/gen1_env.py     # Gymnasium environment — 64-dim obs, ±1 reward
 │   ├── agents/
-│   │   └── heuristic_agent.py  # MaxDamagePlayer baseline
-│   ├── train.py            # PPO training loop (Phase 4)
-│   ├── selfplay_train.py   # Self-play training (Phase 5)
-│   └── callbacks.py        # WinRateCallback
+│   │   ├── heuristic_agent.py   # MaxDamagePlayer baseline
+│   │   └── policy_player.py     # FrozenPolicyPlayer (self-play opponent)
+│   ├── train.py            # Curriculum training: Random → MaxDamage
+│   ├── selfplay_train.py   # Self-play with frozen snapshots
+│   └── callbacks.py        # WinRateCallback — logging, milestones, early stop
 ├── scripts/
-│   ├── verify_setup.py     # Smoke test
-│   └── benchmark_heuristic.py
+│   ├── verify_setup.py
+│   ├── benchmark_heuristic.py
+│   ├── battle_sim.py       # Simulate any two agents head-to-head
+│   └── tournament.py       # Round-robin tournament across checkpoints (Phase 6)
 ├── replays/
 │   └── notable/            # Curated battle replays (open in browser)
 ├── models/                 # Saved checkpoints (gitignored)
 ├── logs/                   # TensorBoard logs (gitignored)
-└── content/                # YouTube video documentation
+└── content/                # Documentation and YouTube video notes
+    ├── agent_knowledge.md  # What the agent sees and doesn't see
+    ├── hooks.md            # Video milestones and content angles
+    └── rl_concepts/        # RL theory docs for technical and general audiences
 ```
 
 ---
@@ -108,14 +137,16 @@ pokemon_rl/
 
 ```
 Own active Pokemon     10 dims   HP, 6 boosts, status, active flag, fainted
-Own moves               16 dims   4 moves × (base_power, type, PP, effectiveness)
-Opponent active          7 dims   HP, 4 boosts, status, fainted
-Own bench               12 dims   6 slots × (HP, fainted)
-Opponent bench          18 dims   6 slots × (HP, fainted, revealed)
-Speed context            1 dim    own_speed > opp_speed?
+Own moves              16 dims   4 moves × (base_power, type, PP, effectiveness)
+Opponent active         7 dims   HP, 4 boosts, status, fainted
+Own bench              12 dims   6 slots × (HP, fainted)
+Opponent bench         18 dims   6 slots × (HP, fainted, revealed)
+Speed context           1 dim    own_speed > opp_speed?
 ```
 
-Reward: `+1.0` win · `-1.0` loss · `0.0` ongoing
+The agent learns from **move features, not slot positions** — base power, type, PP fraction, and type effectiveness vs the current opponent. In random battles where teams change every match, the agent must generalize from features rather than memorizing move slots.
+
+Reward: `+1.0` win · `-1.0` loss · `0.0` ongoing (sparse terminal reward)
 
 ---
 
@@ -127,3 +158,4 @@ Reward: `+1.0` win · `-1.0` loss · `0.0` ongoing
 - **Crit rate from Speed** — fast Pokemon (Tauros, Starmie) crit far more often
 - **No held items, no team preview**
 - **Sleep Clause** — max 1 opponent Pokemon asleep at a time
+- **Ghost/Psychic bug** — Ghost moves are coded as immune to Psychic (should be 2×); experiment planned for Phase 7

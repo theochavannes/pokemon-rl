@@ -67,3 +67,65 @@ Smoke test PASSED
 
 ## Phase 5 — Self-Play
 *(pending)*
+
+### ✅ Win rate crossed 10% — step 10000 (2026-04-02)
+- Avg battle length: 65.8 turns
+- Switch rate: 46.8% of actions
+- Best move used: move_1 (17.6% of move actions)
+- **Why it matters for the video:** The agent crossed 10% win rate vs RandomPlayer at step 10,000. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 25% — step 10000 (2026-04-02)
+- Avg battle length: 65.8 turns
+- Switch rate: 46.8% of actions
+- Best move used: move_1 (17.6% of move actions)
+- **Why it matters for the video:** The agent crossed 25% win rate vs RandomPlayer at step 10,000. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 40% — step 10000 (2026-04-02)
+- Avg battle length: 65.8 turns
+- Switch rate: 46.8% of actions
+- Best move used: move_1 (17.6% of move actions)
+- **Why it matters for the video:** The agent crossed 40% win rate vs RandomPlayer at step 10,000. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 50% — step 10000 (2026-04-02)
+- Avg battle length: 65.8 turns
+- Switch rate: 46.8% of actions
+- Best move used: move_1 (17.6% of move actions)
+- **Why it matters for the video:** The agent crossed 50% win rate vs RandomPlayer at step 10,000. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 60% — step 20000 (2026-04-02)
+- Avg battle length: 55.4 turns
+- Switch rate: 42.2% of actions
+- Best move used: move_1 (19.6% of move actions)
+- **Why it matters for the video:** The agent crossed 60% win rate vs RandomPlayer at step 20,000. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 75% — step 20000 (2026-04-02)
+- Avg battle length: 55.4 turns
+- Switch rate: 42.2% of actions
+- Best move used: move_1 (19.6% of move actions)
+- **Why it matters for the video:** The agent crossed 75% win rate vs RandomPlayer at step 20,000. It is switching more than attacking — may be learning defensive play.
+
+---
+
+### [MEDIA] Future Video Angles — logged 2026-04-02
+
+#### Angle 1: How Close Is It to the Real Competitive RBY Meta?
+Once we have a trained agent in gen1ou format (not randombattle), compare its team choices, move priorities, and win conditions against documented competitive RBY meta:
+- Dominant Gen 1 OU Pokemon: Tauros, Chansey, Starmie, Alakazam, Exeggutor, Snorlax, Jynx, Slowbro, Lapras, Gengar
+- Top strategies: Wrap/Clamp/Bind abuse, Sleep + sweep, Amnesia sweepers, Body Slam paralysis spread
+- Does the agent rediscover these strategies from scratch, or find something different?
+- Hook: "I gave an AI 500,000 battles to learn Pokemon. Here's what it discovered."
+
+#### Angle 2: The Ghost/Psychic Bug — What If Gamefreak Fixed It?
+Gen 1 shipped with a critical type chart bug: Ghost-type moves are IMMUNE to Psychic (0× instead of 2×). This makes Psychic the most broken type in the game — Starmie, Alakazam, Jynx, Slowbro, Exeggutor are all dominant partly because Ghost can't threaten them.
+
+Other known Gen 1 bugs to investigate:
+- Focus Energy: supposed to 4× crit rate, actually reduces it to 1/256
+- 1/256 miss: all 100%-accurate moves have a 1/256 miss chance
+- Hyper Beam: no recharge if it KOs
+- Badge boosts: Gym badges permanently boost stats in battle
+- Special stat: Amnesia doubles Special Attack AND Special Defense simultaneously
+
+Experiment: patch Showdown to fix Ghost→Psychic (0× → 2×) and retrain the agent. Does Gengar (Ghost/Poison) become viable? Does the Psychic-type stranglehold break?
+Hook: "What would competitive Pokemon look like if Gamefreak hadn't shipped a 30-year-old bug?"
+
+**Why this is compelling for video:** The agent has no preconceptions — it will discover the optimal meta purely from battle outcomes. If we fix the bug, it will show us the counterfactual history of Pokemon competitive play.

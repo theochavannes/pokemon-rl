@@ -79,6 +79,68 @@ def _move_features(move, opponent) -> list:
     return [base_power, type_index, pp_fraction, effectiveness]
 
 
+def embed_battle(battle) -> np.ndarray:
+    """
+    Standalone embedding function — usable outside Gen1Env (e.g. by FrozenPolicyPlayer).
+    Produces a 64-dim float32 observation from a poke-env Battle object.
+    """
+    obs = []
+    own = battle.active_pokemon
+    opp = battle.opponent_active_pokemon
+
+    obs.append(_hp(own))
+    obs.append(_boost(own.boosts, "atk"))
+    obs.append(_boost(own.boosts, "def"))
+    obs.append(_boost(own.boosts, "spe"))
+    obs.append(_boost(own.boosts, "spa"))
+    obs.append(_boost(own.boosts, "accuracy"))
+    obs.append(_boost(own.boosts, "evasion"))
+    obs.append(_status(own))
+    obs.append(1.0)
+    obs.append(1.0 if own.fainted else 0.0)
+
+    moves = list(own.moves.values())[:4]
+    for move in moves:
+        obs.extend(_move_features(move, opp))
+    for _ in range(4 - len(moves)):
+        obs.extend([0.0, 0.0, 0.0, 0.0])
+
+    obs.append(_hp(opp))
+    obs.append(_boost(opp.boosts, "atk"))
+    obs.append(_boost(opp.boosts, "def"))
+    obs.append(_boost(opp.boosts, "spe"))
+    obs.append(_boost(opp.boosts, "spa"))
+    obs.append(_status(opp))
+    obs.append(1.0 if opp.fainted else 0.0)
+
+    own_team = list(battle.team.values())
+    for i in range(6):
+        if i < len(own_team):
+            mon = own_team[i]
+            obs.append(_hp(mon))
+            obs.append(1.0 if mon.fainted else 0.0)
+        else:
+            obs.extend([0.0, 0.0])
+
+    opp_team = list(battle.opponent_team.values())
+    for i in range(6):
+        if i < len(opp_team):
+            mon = opp_team[i]
+            obs.append(_hp(mon))
+            obs.append(1.0 if mon.fainted else 0.0)
+            obs.append(1.0)
+        else:
+            obs.extend([-1.0, 0.0, 0.0])
+
+    own_speed = own.base_stats.get("spe", 0)
+    opp_speed = opp.base_stats.get("spe", 0) if opp else 0
+    obs.append(1.0 if own_speed > opp_speed else 0.0)
+
+    result = np.array(obs, dtype=np.float32)
+    assert result.shape == (64,), f"Obs shape mismatch: expected (64,), got {result.shape}"
+    return result
+
+
 class Gen1Env(SinglesEnv):
     """
     Gen 1 random battle environment for MaskablePPO.
@@ -111,71 +173,7 @@ class Gen1Env(SinglesEnv):
         )
 
     def embed_battle(self, battle) -> np.ndarray:
-        obs = []
-        own = battle.active_pokemon
-        opp = battle.opponent_active_pokemon
-
-        # --- Own active Pokemon (10 dims) ---
-        obs.append(_hp(own))
-        obs.append(_boost(own.boosts, "atk"))
-        obs.append(_boost(own.boosts, "def"))
-        obs.append(_boost(own.boosts, "spe"))
-        obs.append(_boost(own.boosts, "spa"))   # Gen 1 Special stat
-        obs.append(_boost(own.boosts, "accuracy"))
-        obs.append(_boost(own.boosts, "evasion"))
-        obs.append(_status(own))
-        obs.append(1.0)                          # is_active placeholder (always 1)
-        obs.append(1.0 if own.fainted else 0.0)
-
-        # --- Own moves (4 × 4 = 16 dims) ---
-        # Use active_pokemon.moves (all known moves) not available_moves
-        # (available_moves changes per step and excludes PP=0 moves)
-        moves = list(own.moves.values())[:4]
-        for move in moves:
-            obs.extend(_move_features(move, opp))
-        for _ in range(4 - len(moves)):          # pad if fewer than 4 moves known
-            obs.extend([0.0, 0.0, 0.0, 0.0])
-
-        # --- Opponent active Pokemon (7 dims) ---
-        obs.append(_hp(opp))
-        obs.append(_boost(opp.boosts, "atk"))
-        obs.append(_boost(opp.boosts, "def"))
-        obs.append(_boost(opp.boosts, "spe"))
-        obs.append(_boost(opp.boosts, "spa"))
-        obs.append(_status(opp))
-        obs.append(1.0 if opp.fainted else 0.0)
-
-        # --- Own bench (6 × 2 = 12 dims) ---
-        own_team = list(battle.team.values())
-        for i in range(6):
-            if i < len(own_team):
-                mon = own_team[i]
-                obs.append(_hp(mon))
-                obs.append(1.0 if mon.fainted else 0.0)
-            else:
-                obs.extend([0.0, 0.0])
-
-        # --- Opponent bench (6 × 3 = 18 dims) ---
-        # Slots beyond what's been revealed stay at [-1, 0, 0]
-        # This makes "not revealed" a learnable signal distinct from "fainted"
-        opp_team = list(battle.opponent_team.values())
-        for i in range(6):
-            if i < len(opp_team):
-                mon = opp_team[i]
-                obs.append(_hp(mon))
-                obs.append(1.0 if mon.fainted else 0.0)
-                obs.append(1.0)                  # revealed = True
-            else:
-                obs.extend([-1.0, 0.0, 0.0])    # unrevealed slot
-
-        # --- Speed context (1 dim) ---
-        own_speed = own.base_stats.get("spe", 0)
-        opp_speed = opp.base_stats.get("spe", 0) if opp else 0
-        obs.append(1.0 if own_speed > opp_speed else 0.0)
-
-        result = np.array(obs, dtype=np.float32)
-        assert result.shape == (64,), f"Obs shape mismatch: expected (64,), got {result.shape}"
-        return result
+        return embed_battle(battle)
 
     def describe_embedding(self):
         return Box(low=-1.0, high=1.0, shape=(64,), dtype=np.float32)
@@ -208,23 +206,28 @@ class SB3Wrapper(gymnasium.Wrapper):
         return self._last_action_mask
 
 
-def make_env(env_index: int = 0, battle_format: str = "gen1randombattle", save_replays: bool | str = False) -> SB3Wrapper:
+def make_env(
+    env_index: int = 0,
+    battle_format: str = "gen1randombattle",
+    save_replays: bool | str = False,
+    opponent_type: str = "random",
+    opponent_model_path: str | None = None,
+) -> "Monitor":
     """
-    Factory function for creating a single SB3-compatible Gen 1 environment.
+    Factory for a single SB3-compatible Gen 1 environment.
 
-    Each env gets unique usernames to allow parallel instances without conflicts.
-    A random 6-char suffix is appended so reconnecting after a crash never
-    collides with a leftover battle on the Showdown server.
-
-    The opponent player is a puppet (start_listening=False) — it provides move
-    choices but has no WebSocket connection; the battle is injected directly.
+    opponent_type:
+        "random"    — RandomPlayer (default, Phase A)
+        "maxdamage" — MaxDamagePlayer (Phase B)
+        "policy"    — FrozenPolicyPlayer loaded from opponent_model_path (Phase C / self-play)
 
     Use with functools.partial for SubprocVecEnv (lambdas are not picklable):
-        envs = SubprocVecEnv([partial(make_env, i) for i in range(N_ENVS)])
+        envs = SubprocVecEnv([partial(make_env, i, opponent_type="maxdamage") for i in range(N)])
     """
     import random
     import string
     from poke_env.player.baselines import RandomPlayer
+    from stable_baselines3.common.monitor import Monitor
 
     suffix = "".join(random.choices(string.ascii_lowercase, k=6))
     inner = Gen1Env(
@@ -234,10 +237,35 @@ def make_env(env_index: int = 0, battle_format: str = "gen1randombattle", save_r
         log_level=25,
         save_replays=save_replays,
     )
-    opponent = RandomPlayer(
-        battle_format=battle_format,
-        account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
-        start_listening=False,
-        log_level=25,
-    )
-    return SB3Wrapper(SingleAgentWrapper(inner, opponent))
+
+    if opponent_type == "random":
+        from poke_env.player.baselines import RandomPlayer as _RP
+        opponent = _RP(
+            battle_format=battle_format,
+            account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
+            start_listening=False,
+            log_level=25,
+        )
+    elif opponent_type == "maxdamage":
+        from src.agents.heuristic_agent import MaxDamagePlayer
+        opponent = MaxDamagePlayer(
+            battle_format=battle_format,
+            account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
+            start_listening=False,
+            log_level=25,
+        )
+    elif opponent_type == "policy":
+        if opponent_model_path is None:
+            raise ValueError("opponent_model_path required for opponent_type='policy'")
+        from src.agents.policy_player import FrozenPolicyPlayer
+        opponent = FrozenPolicyPlayer(
+            model_path=opponent_model_path,
+            battle_format=battle_format,
+            account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
+            start_listening=False,
+            log_level=25,
+        )
+    else:
+        raise ValueError(f"Unknown opponent_type: {opponent_type!r}")
+
+    return Monitor(SB3Wrapper(SingleAgentWrapper(inner, opponent)))

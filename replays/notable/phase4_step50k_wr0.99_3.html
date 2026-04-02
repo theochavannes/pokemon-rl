@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<!-- version 1 -->
+<title>battle-gen1randombattle-2184</title>
+<style>
+    html,
+    body {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+        margin: 0;
+        padding: 0;
+    }
+
+    body {
+        padding: 12px 0;
+    }
+
+    .battle-log {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+    }
+
+    .battle-log-inline {
+        border: 1px solid #AAAAAA;
+        background: #EEF2F5;
+        color: black;
+        max-width: 640px;
+        margin: 0 auto 80px;
+        padding-bottom: 5px;
+    }
+
+    .battle-log .inner {
+        padding: 4px 8px 0px 8px;
+    }
+
+    .battle-log .inner-preempt {
+        padding: 0 8px 4px 8px;
+    }
+
+    .battle-log .inner-after {
+        margin-top: 0.5em;
+    }
+
+    .battle-log h2 {
+        margin: 0.5em -8px;
+        padding: 4px 8px;
+        border: 1px solid #AAAAAA;
+        background: #E0E7EA;
+        border-left: 0;
+        border-right: 0;
+        font-family: Verdana, sans-serif;
+        font-size: 13pt;
+    }
+
+    .backprop {
+        top: 0;
+    }
+
+    .battle-log .chat {
+        vertical-align: middle;
+        padding: 3px 0 3px 0;
+        font-size: 8pt;
+    }
+
+    .battle-log .chat strong {
+        color: #40576A;
+    }
+
+    .battle-log .chat em {
+        padding: 1px 4px 1px 3px;
+        color: #000000;
+        font-style: normal;
+    }
+
+    .chat.mine {
+        background: rgba(0, 0, 0, 0.05);
+        margin-left: -8px;
+        margin-right: -8px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .spoiler {
+        color: #BBBBBB;
+        background: #BBBBBB;
+        padding: 0px 3px;
+    }
+
+    .spoiler:hover,
+    .spoiler:active,
+    .spoiler-shown {
+        color: #000000;
+        background: #E2E2E2;
+        padding: 0px 3px;
+    }
+
+    .spoiler a {
+        color: #BBBBBB;
+    }
+
+    .spoiler:hover a,
+    .spoiler:active a,
+    .spoiler-shown a {
+        color: #2288CC;
+    }
+
+    .chat code,
+    .chat .spoiler:hover code,
+    .chat .spoiler:active code,
+    .chat .spoiler-shown code {
+        border: 1px solid #C0C0C0;
+        background: #EEEEEE;
+        color: black;
+        padding: 0 2px;
+    }
+
+    .chat .spoiler code {
+        border: 1px solid #CCCCCC;
+        background: #CCCCCC;
+        color: #CCCCCC;
+    }
+
+    .battle-log .rated {
+        padding: 3px 4px;
+    }
+
+    .battle-log .rated strong {
+        color: white;
+        background: #89A;
+        padding: 1px 4px;
+        border-radius: 4px;
+    }
+
+    .spacer {
+        margin-top: 0.5em;
+    }
+
+    .message-announce {
+        background: #6688AA;
+        color: white;
+        padding: 1px 4px 2px;
+    }
+
+    .message-announce a,
+    .broadcast-green a,
+    .broadcast-blue a,
+    .broadcast-red a {
+        color: #DDEEFF;
+    }
+
+    .broadcast-green {
+        background-color: #559955;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .broadcast-blue {
+        background-color: #6688AA;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .infobox {
+        border: 1px solid #6688AA;
+        padding: 2px 4px;
+    }
+
+    .infobox-limited {
+        max-height: 200px;
+        overflow: auto;
+        overflow-x: hidden;
+    }
+
+    .broadcast-red {
+        background-color: #AA5544;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .message-learn-canlearn {
+        font-weight: bold;
+        color: #228822;
+        text-decoration: underline;
+    }
+
+    .message-learn-cannotlearn {
+        font-weight: bold;
+        color: #CC2222;
+        text-decoration: underline;
+    }
+
+    .message-effect-weak {
+        font-weight: bold;
+        color: #CC2222;
+    }
+
+    .message-effect-resist {
+        font-weight: bold;
+        color: #6688AA;
+    }
+
+    .message-effect-immune {
+        font-weight: bold;
+        color: #666666;
+    }
+
+    .message-learn-list {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    .message-throttle-notice,
+    .message-error {
+        color: #992222;
+    }
+
+    .message-overflow,
+    .chat small.message-overflow {
+        font-size: 0pt;
+    }
+
+    .message-overflow::before {
+        font-size: 9pt;
+        content: '...';
+    }
+
+    .subtle {
+        color: #3A4A66;
+    }
+</style>
+<div class="wrapper replay-wrapper" style="max-width:1180px;margin:0 auto">
+    <input type="hidden" name="replayid" value="unregisteredserver-gen8randombattle-320064" />
+    <div class="battle"></div>
+    <div class="battle-log"></div>
+    <div class="replay-controls"></div>
+    <div class="replay-controls-2"></div>
+    <h1 style="font-weight:normal;text-align:center"><strong>poke-env battle replay</strong><br />battle-gen1randombattle-2184<br /><a
+            href="http://pokemonshowdown.com/users/randomplayer1" class="subtle" target="_blank">RandOpp0wcavhz</a>
+        vs. <a href="http://pokemonshowdown.com/users/randomplayer2" class="subtle"
+            target="_blank">PPOAgent0wcavhz</a></h1>
+    <script type="text/plain" class="battle-log-data">
+    >battle-gen1randombattle-2184
+|init|battle
+|title|PPOAgent0wcavhz vs. RandOpp0wcavhz
+|j|☆PPOAgent0wcavhz
+|j|☆RandOpp0wcavhz
+|gametype|singles
+|player|p1|PPOAgent0wcavhz|169|
+|player|p2|RandOpp0wcavhz|170|
+|gen|1
+|tier|[Gen 1] Random Battle
+|rule|Desync Clause Mod: Desyncs changed to move failure.
+|rule|HP Percentage Mod: HP is shown in percentages
+|rule|Endless Battle Clause: Forcing endless battles is banned
+|rule|Sleep Clause Mod: Limit one foe put to sleep
+|rule|Freeze Clause Mod: Limit one foe frozen
+|rule|Species Clause: Limit one of each Pokémon
+|rule|OHKO Clause: OHKO moves are banned
+|rule|Evasion Moves Clause: Evasion moves are banned
+|
+|teamsize|p1|6
+|teamsize|p2|6
+|start
+|switch|p1a: Dewgong|Dewgong, L74|100/100
+|switch|p2a: Slowpoke|Slowpoke, L83|319/319
+|turn|1
+|
+|move|p1a: Dewgong|Surf|p2a: Slowpoke
+|-resisted|p2a: Slowpoke
+|-damage|p2a: Slowpoke|261/319
+|move|p2a: Slowpoke|Amnesia|p2a: Slowpoke
+|-boost|p2a: Slowpoke|spa|2
+|-boost|p2a: Slowpoke|spd|2
+|
+|upkeep
+|turn|2
+|
+|move|p1a: Dewgong|Surf|p2a: Slowpoke
+|-resisted|p2a: Slowpoke
+|-damage|p2a: Slowpoke|233/319
+|move|p2a: Slowpoke|Thunder Wave|p1a: Dewgong
+|-status|p1a: Dewgong|par
+|
+|upkeep
+|turn|3
+|
+|move|p2a: Slowpoke|Thunder Wave|p1a: Dewgong
+|-fail|p1a: Dewgong|par
+|move|p1a: Dewgong|Surf|p2a: Slowpoke
+|-resisted|p2a: Slowpoke
+|-damage|p2a: Slowpoke|202/319
+|
+|upkeep
+|turn|4
+|
+|move|p2a: Slowpoke|Surf|p1a: Dewgong
+|-resisted|p1a: Dewgong
+|-damage|p1a: Dewgong|78/100 par
+|move|p1a: Dewgong|Hyper Beam|p2a: Slowpoke
+|-damage|p2a: Slowpoke|119/319
+|-mustrecharge|p1a: Dewgong
+|
+|upkeep
+|turn|5
+|
+|move|p2a: Slowpoke|Amnesia|p2a: Slowpoke
+|-boost|p2a: Slowpoke|spa|2
+|-boost|p2a: Slowpoke|spd|2
+|cant|p1a: Dewgong|recharge
+|
+|upkeep
+|turn|6
+|
+|move|p2a: Slowpoke|Thunder Wave|p1a: Dewgong
+|-fail|p1a: Dewgong|par
+|move|p1a: Dewgong|Hyper Beam|p2a: Slowpoke
+|-damage|p2a: Slowpoke|33/319
+|-mustrecharge|p1a: Dewgong
+|
+|upkeep
+|turn|7
+|
+|switch|p2a: Ponyta|Ponyta, L84|256/256
+|cant|p1a: Dewgong|recharge
+|
+|upkeep
+|turn|8
+|
+|move|p2a: Ponyta|Fire Blast|p1a: Dewgong|[miss]
+|-miss|p2a: Ponyta
+|cant|p1a: Dewgong|par
+|
+|upkeep
+|turn|9
+|
+|switch|p2a: Weepinbell|Weepinbell, L80|268/268
+|cant|p1a: Dewgong|par
+|
+|upkeep
+|turn|10
+|
+|move|p2a: Weepinbell|Double-Edge|p1a: Dewgong
+|-damage|p1a: Dewgong|54/100 par
+|-damage|p2a: Weepinbell|251/268|[from] Recoil|[of] p1a: Dewgong
+|move|p1a: Dewgong|Surf|p2a: Weepinbell
+|-resisted|p2a: Weepinbell
+|-damage|p2a: Weepinbell|211/268
+|
+|upkeep
+|turn|11
+|
+|move|p2a: Weepinbell|Swords Dance|p2a: Weepinbell
+|-boost|p2a: Weepinbell|atk|2
+|cant|p1a: Dewgong|par
+|
+|upkeep
+|turn|12
+|
+|move|p2a: Weepinbell|Swords Dance|p2a: Weepinbell
+|-boost|p2a: Weepinbell|atk|2
+|move|p1a: Dewgong|Hyper Beam|p2a: Weepinbell
+|-damage|p2a: Weepinbell|113/268
+|-mustrecharge|p1a: Dewgong
+|
+|upkeep
+|turn|13
+|
+|move|p2a: Weepinbell|Razor Leaf|p1a: Dewgong
+|-crit|p1a: Dewgong
+|-supereffective|p1a: Dewgong
+|-damage|p1a: Dewgong|0 fnt
+|faint|p1a: Dewgong
+|
+|switch|p1a: Moltres|Moltres, L73|100/100
+|turn|14
+|
+|move|p1a: Moltres|Fire Blast|p2a: Weepinbell
+|-supereffective|p2a: Weepinbell
+|-damage|p2a: Weepinbell|0 fnt
+|faint|p2a: Weepinbell
+|
+|switch|p2a: Bulbasaur|Bulbasaur, L91|267/267
+|turn|15
+|
+|move|p1a: Moltres|Fire Blast|p2a: Bulbasaur
+|-supereffective|p2a: Bulbasaur
+|-damage|p2a: Bulbasaur|0 fnt
+|faint|p2a: Bulbasaur
+|
+|switch|p2a: Slowpoke|Slowpoke, L83|33/319
+|turn|16
+|
+|switch|p2a: Flareon|Flareon, L76|255/255
+|move|p1a: Moltres|Fire Blast|p2a: Flareon
+|-crit|p2a: Flareon
+|-resisted|p2a: Flareon
+|-damage|p2a: Flareon|153/255
+|
+|upkeep
+|turn|17
+|
+|switch|p2a: Slowpoke|Slowpoke, L83|33/319
+|move|p1a: Moltres|Hyper Beam|p2a: Slowpoke
+|-damage|p2a: Slowpoke|0 fnt
+|faint|p2a: Slowpoke
+|
+|switch|p2a: Mr. Mime|Mr. Mime, L75|214/214
+|turn|18
+|
+|switch|p2a: Ponyta|Ponyta, L84|256/256
+|move|p1a: Moltres|Reflect|p1a: Moltres
+|-start|p1a: Moltres|Reflect
+|
+|upkeep
+|turn|19
+|
+|move|p2a: Ponyta|Agility|p2a: Ponyta
+|-boost|p2a: Ponyta|spe|2
+|move|p1a: Moltres|Agility|p1a: Moltres
+|-boost|p1a: Moltres|spe|2
+|
+|upkeep
+|turn|20
+|
+|switch|p2a: Mr. Mime|Mr. Mime, L75|214/214
+|move|p1a: Moltres|Fire Blast|p2a: Mr. Mime
+|-crit|p2a: Mr. Mime
+|-damage|p2a: Mr. Mime|0 fnt
+|faint|p2a: Mr. Mime
+|
+|switch|p2a: Flareon|Flareon, L76|153/255
+|turn|21
+|
+|switch|p2a: Ponyta|Ponyta, L84|256/256
+|move|p1a: Moltres|Fire Blast|p2a: Ponyta
+|-resisted|p2a: Ponyta
+|-damage|p2a: Ponyta|192/256
+|
+|upkeep
+|turn|22
+|
+|move|p1a: Moltres|Fire Blast|p2a: Ponyta
+|-crit|p2a: Ponyta
+|-resisted|p2a: Ponyta
+|-damage|p2a: Ponyta|61/256
+|move|p2a: Ponyta|Fire Blast|p1a: Moltres
+|-resisted|p1a: Moltres
+|-damage|p1a: Moltres|85/100
+|
+|upkeep
+|turn|23
+|
+|move|p1a: Moltres|Fire Blast|p2a: Ponyta
+|-resisted|p2a: Ponyta
+|-damage|p2a: Ponyta|0 fnt
+|faint|p2a: Ponyta
+|
+|switch|p2a: Flareon|Flareon, L76|153/255
+|turn|24
+|
+|move|p2a: Flareon|Quick Attack|p1a: Moltres
+|-crit|p1a: Moltres
+|-damage|p1a: Moltres|63/100
+|move|p1a: Moltres|Fire Blast|p2a: Flareon
+|-resisted|p2a: Flareon
+|-damage|p2a: Flareon|94/255
+|
+|upkeep
+|turn|25
+|
+|move|p1a: Moltres|Reflect|p1a: Moltres
+|-fail|p1a: Moltres
+|move|p2a: Flareon|Hyper Beam|p1a: Moltres
+|-crit|p1a: Moltres
+|-damage|p1a: Moltres|0 fnt
+|faint|p1a: Moltres
+|
+|switch|p1a: Jigglypuff|Jigglypuff, L89|100/100
+|turn|26
+|
+|move|p2a: Flareon|Fire Blast|p1a: Jigglypuff|[miss]
+|-miss|p2a: Flareon
+|move|p1a: Jigglypuff|Thunder Wave|p2a: Flareon
+|-status|p2a: Flareon|par
+|
+|upkeep
+|turn|27
+|
+|move|p1a: Jigglypuff|Sing|p2a: Flareon|[miss]
+|-miss|p1a: Jigglypuff
+|move|p2a: Flareon|Fire Blast|p1a: Jigglypuff
+|-damage|p1a: Jigglypuff|47/100
+|-status|p1a: Jigglypuff|brn
+|
+|upkeep
+|turn|28
+|
+|move|p1a: Jigglypuff|Sing|p2a: Flareon|[miss]
+|-miss|p1a: Jigglypuff
+|-damage|p1a: Jigglypuff|40/100 brn|[from] brn|[of] p2a: Flareon
+|move|p2a: Flareon|Hyper Beam|p1a: Jigglypuff
+|-crit|p1a: Jigglypuff
+|-damage|p1a: Jigglypuff|0 fnt
+|faint|p1a: Jigglypuff
+|
+|switch|p1a: Electabuzz|Electabuzz, L74|100/100
+|turn|29
+|
+|move|p1a: Electabuzz|Thunderbolt|p2a: Flareon
+|-damage|p2a: Flareon|26/255 par
+|move|p2a: Flareon|Fire Blast|p1a: Electabuzz
+|-damage|p1a: Electabuzz|44/100
+|-status|p1a: Electabuzz|brn
+|
+|upkeep
+|turn|30
+|
+|move|p1a: Electabuzz|Thunder Wave|p2a: Flareon
+|-fail|p2a: Flareon|par
+|-damage|p1a: Electabuzz|38/100 brn|[from] brn|[of] p2a: Flareon
+|move|p2a: Flareon|Hyper Beam|p1a: Electabuzz
+|-damage|p1a: Electabuzz|0 fnt
+|faint|p1a: Electabuzz
+|
+|switch|p1a: Hypno|Hypno, L72|100/100
+|turn|31
+|
+|cant|p2a: Flareon|par
+|move|p1a: Hypno|Hypnosis|p2a: Flareon|[miss]
+|-miss|p1a: Hypno
+|
+|upkeep
+|turn|32
+|
+|move|p2a: Flareon|Quick Attack|p1a: Hypno
+|-damage|p1a: Hypno|86/100
+|move|p1a: Hypno|Psychic|p2a: Flareon
+|-crit|p2a: Flareon
+|-damage|p2a: Flareon|0 fnt
+|faint|p2a: Flareon
+|
+|win|PPOAgent0wcavhz
+    </script>
+</div>
+
+<div class="battle-log battle-log-inline" style="display:none"></div>
+
+<script>
+    let daily = Math.floor(Date.now() / 1000 / 60 / 60 / 24); document.write('<script src="https://play.pokemonshowdown.com/js/replay-embed.js?version' + daily + '"></' + 'script>');
+</script>
+
+<p style="text-align:center"> Replay created by <a href="https://github.com/hsahovic/poke-env">poke-env</a>, with code from <a
+        href="https://github.com/smogon/pokemon-showdown"> pokemon-showdown</a>. If something goes wrong, don't hesitate
+    to open an <a href="https://github.com/hsahovic/poke-env/issues">issue!</a></p>
