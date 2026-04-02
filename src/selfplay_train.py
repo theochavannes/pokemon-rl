@@ -1,17 +1,16 @@
 """
-Phase C — Self-play training.
+Self-play training — agent trains against frozen snapshots of itself.
 
-The agent trains against frozen snapshots of itself.
-Every OPPONENT_UPDATE_FREQ steps the frozen opponent is updated to the latest best_model,
-so the agent always faces a progressively stronger version of itself.
+Every OPPONENT_UPDATE_FREQ steps the frozen opponent is updated to the latest best_model.
+Outputs go to the same run as the curriculum (runs/run_NNN/) or a new run if standalone.
 
-Usage (Showdown server must be running + phase B must be complete):
-    C:/Users/theoc/miniconda3/envs/pokemon_rl/python.exe src/selfplay_train.py
-
-The script looks for phase_B_final.zip (or best_model.zip as fallback) to seed both
-the learning agent and the initial frozen opponent.
+Usage:
+    python src/selfplay_train.py                  # auto-detect latest curriculum run
+    python src/selfplay_train.py --run run_001    # continue a specific run
+    python src/selfplay_train.py --new-run        # fresh self-play run from best_model
 """
 
+import argparse
 import atexit
 import ctypes
 import os
@@ -29,6 +28,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 
 from src.callbacks import WinRateCallback
 from src.env.gen1_env import make_env
+from src.run_manager import RunManager, RUNS_DIR
 
 # ---------------------------------------------------------------------------
 # Config
@@ -36,14 +36,7 @@ from src.env.gen1_env import make_env
 
 BATTLE_FORMAT = "gen1randombattle"
 TOTAL_TIMESTEPS = 500_000
-MODEL_DIR = "models"
-LOG_DIR = "logs"
-REPLAY_DIR = "replays/selfplay"
-
 N_ENVS = 1
-
-# Swap the frozen opponent every N steps to keep training challenging.
-# Too frequent = unstable (chasing a moving target); too rare = overfits to old self.
 OPPONENT_UPDATE_FREQ = 50_000
 
 PPO_KWARGS = dict(
@@ -56,11 +49,7 @@ PPO_KWARGS = dict(
     clip_range=0.2,
     learning_rate=3e-4,
     verbose=0,
-    tensorboard_log=LOG_DIR,
 )
-
-# Frozen opponent model path — this file is overwritten every OPPONENT_UPDATE_FREQ steps
-_FROZEN_PATH = str(Path(MODEL_DIR) / "selfplay_frozen_opponent")
 
 
 def _prevent_sleep() -> None:
@@ -74,15 +63,10 @@ def _prevent_sleep() -> None:
 
 
 class OpponentSwapCallback(BaseCallback):
-    """
-    Every OPPONENT_UPDATE_FREQ steps:
-    1. Saves current best_model as the new frozen opponent checkpoint.
-    2. Calls swap_model() on all FrozenPolicyPlayer instances in the env.
-    """
-
-    def __init__(self, env: DummyVecEnv, update_freq: int, verbose: int = 1):
+    def __init__(self, env: DummyVecEnv, frozen_path: str, update_freq: int, verbose: int = 1):
         super().__init__(verbose)
         self.env = env
+        self.frozen_path = frozen_path
         self.update_freq = update_freq
         self._last_swap = 0
 
@@ -93,106 +77,118 @@ class OpponentSwapCallback(BaseCallback):
         return True
 
     def _swap_opponent(self) -> None:
-        # Save current model as the new frozen snapshot
-        self.model.save(_FROZEN_PATH)
-
-        # Reach into the DummyVecEnv to hot-swap each opponent's model
-        # DummyVecEnv stores envs in self.envs (list of Monitor-wrapped envs)
+        self.model.save(self.frozen_path)
         swapped = 0
         for env in self.env.envs:
-            # Unwrap Monitor → SB3Wrapper → SingleAgentWrapper to reach the opponent
             try:
-                opponent = env.env.env.opponent  # Monitor.env.SB3Wrapper.env.SingleAgentWrapper.opponent
+                opponent = env.env.env.opponent
                 if hasattr(opponent, "swap_model"):
-                    opponent.swap_model(_FROZEN_PATH)
+                    opponent.swap_model(self.frozen_path)
                     swapped += 1
             except AttributeError:
                 pass
-
         if self.verbose and swapped > 0:
-            print(f"  [SelfPlay] Opponent updated at step {self.num_timesteps:,} ({swapped} env(s))")
+            print(f"  [SelfPlay] Opponent updated at step {self.num_timesteps:,}")
 
 
-def _seed_model_path() -> str:
-    """Find the best starting checkpoint for self-play seeding."""
-    for candidate in ["phase_B_final", "best_model"]:
-        p = Path(MODEL_DIR) / f"{candidate}.zip"
-        if p.exists():
-            return str(Path(MODEL_DIR) / candidate)
-    raise FileNotFoundError(
-        f"No starting model found in {MODEL_DIR}/. "
-        "Run src/train.py (phase A + B curriculum) first."
+def _find_seed(run: RunManager) -> str:
+    """Find the best model to seed self-play from (within this run or globally)."""
+    for candidate in [
+        str(Path(run.models_dir) / "phase_B_final"),
+        str(Path(run.models_dir) / "best_model"),
+    ]:
+        if Path(candidate + ".zip").exists():
+            return candidate
+    # Fallback: search all runs for phase_B_final or best_model
+    for run_dir in sorted(RUNS_DIR.glob("run_*"), reverse=True):
+        for candidate in ["phase_B_final", "best_model"]:
+            p = run_dir / "models" / f"{candidate}.zip"
+            if p.exists():
+                return str(p.with_suffix(""))
+    raise FileNotFoundError("No seed model found. Run src/train.py first.")
+
+
+def main(run_id: str | None = None, new_run: bool = False) -> None:
+    _prevent_sleep()
+
+    run = RunManager(
+        run_type="selfplay",
+        config={"total_timesteps": TOTAL_TIMESTEPS, "opponent_update_freq": OPPONENT_UPDATE_FREQ, **PPO_KWARGS},
+        new_run=new_run,
     )
 
+    os.makedirs(run.models_dir, exist_ok=True)
+    os.makedirs(run.logs_dir, exist_ok=True)
 
-def main() -> None:
-    _prevent_sleep()
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    os.makedirs(LOG_DIR, exist_ok=True)
-    os.makedirs(REPLAY_DIR, exist_ok=True)
+    seed_path = _find_seed(run)
+    frozen_path = str(Path(run.models_dir) / "selfplay_frozen_opponent")
 
-    seed_path = _seed_model_path()
-    print(f"\nSelf-play seeded from: {seed_path}.zip")
+    print(f"\n{run.run_id} — Self-play training")
+    print(f"  Seed model:      {seed_path}.zip")
+    print(f"  Frozen opponent: {frozen_path}.zip (updated every {OPPONENT_UPDATE_FREQ:,} steps)")
 
-    # Save seed as the initial frozen opponent
+    # Save seed as initial frozen opponent
     seed_model = MaskablePPO.load(seed_path)
-    seed_model.save(_FROZEN_PATH)
+    seed_model.save(frozen_path)
     del seed_model
 
-    print(f"Frozen opponent initialised: {_FROZEN_PATH}.zip")
-    print(f"Opponent will update every {OPPONENT_UPDATE_FREQ:,} steps\n")
+    replay_dir = run.replays_dir("selfplay")
 
-    # Build env — opponent is FrozenPolicyPlayer reading from _FROZEN_PATH
     env_fns = [
         partial(
             make_env,
             env_index=i,
             battle_format=BATTLE_FORMAT,
-            save_replays=REPLAY_DIR,
+            save_replays=replay_dir,
             opponent_type="policy",
-            opponent_model_path=_FROZEN_PATH,
+            opponent_model_path=frozen_path,
         )
         for i in range(N_ENVS)
     ]
     env = DummyVecEnv(env_fns)
 
-    # Load the learning model from seed
     model = MaskablePPO.load(
         seed_path,
         env=env,
         **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
     )
+    model.tensorboard_log = run.logs_dir
     model.verbose = 0
 
-    # Callbacks
     win_rate_cb = WinRateCallback(
         window=100,
         eval_freq=10_000,
-        save_path=MODEL_DIR,
-        replay_dir=REPLAY_DIR,
+        save_path=run.models_dir,
+        replay_dir=replay_dir,
         notable_dir="replays/notable",
         verbose=1,
         phase_label="Self",
+        training_log_path=run.training_log,
     )
-    swap_cb = OpponentSwapCallback(env=env, update_freq=OPPONENT_UPDATE_FREQ, verbose=1)
+    swap_cb = OpponentSwapCallback(env=env, frozen_path=frozen_path, update_freq=OPPONENT_UPDATE_FREQ)
     checkpoint_cb = CheckpointCallback(
         save_freq=50_000,
-        save_path=MODEL_DIR,
+        save_path=run.models_dir,
         name_prefix="selfplay",
         verbose=0,
     )
 
-    print(f"Training for {TOTAL_TIMESTEPS:,} steps vs frozen self...\n")
+    print(f"\n  Training for {TOTAL_TIMESTEPS:,} steps...\n")
     model.learn(
         total_timesteps=TOTAL_TIMESTEPS,
         callback=[win_rate_cb, swap_cb, checkpoint_cb],
         reset_num_timesteps=True,
     )
 
-    final_path = os.path.join(MODEL_DIR, "selfplay_final")
+    final_path = str(Path(run.models_dir) / "selfplay_final")
     model.save(final_path)
-    print(f"\nSelf-play complete. Final model: {final_path}.zip")
+    run.mark_complete()
+    print(f"\nSelf-play complete → {final_path}.zip")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run", default=None, help="Specific run ID to continue (e.g. run_001)")
+    parser.add_argument("--new-run", action="store_true", help="Force a new run")
+    args = parser.parse_args()
+    main(run_id=args.run, new_run=args.new_run)

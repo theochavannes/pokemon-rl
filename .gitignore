@@ -1,9 +1,20 @@
 __pycache__/
 *.pyc
 .env
+
+# Legacy top-level dirs (kept for backwards compat, new runs go to runs/)
 logs/
 models/
+
+# Run outputs — keep metadata, ignore large binary/replay data
+runs/*/models/
+runs/*/logs/
+runs/*/replays/
+
+# Curated replays committed manually
 replays/*
 !replays/notable/
+
+# Internal
 .claude/
 src/replays/

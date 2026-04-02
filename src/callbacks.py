@@ -60,6 +60,7 @@ class WinRateCallback(BaseCallback):
         verbose: int = 1,
         stop_at_win_rate: float | None = None,
         phase_label: str = "",
+        training_log_path: str | None = None,
     ):
         super().__init__(verbose)
         self.window = window
@@ -69,7 +70,8 @@ class WinRateCallback(BaseCallback):
         self.notable_dir = Path(notable_dir)
         self.stop_at_win_rate = stop_at_win_rate
         self.phase_label = phase_label or ""
-        self.content_log = Path("content/training_log.md")
+        # Per-run log if provided, otherwise fall back to legacy path
+        self.content_log = Path(training_log_path) if training_log_path else Path("content/training_log.md")
         self.hooks_log = Path("content/hooks.md")
 
         self._episode_rewards: deque = deque(maxlen=window)
