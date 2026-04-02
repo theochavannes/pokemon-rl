@@ -1,131 +1,179 @@
-# Screen Recording Hooks
+# Video Content Hooks
 
-Moments worth capturing on screen, logged as they happen.
-
----
-
-## Phase 1 — Infrastructure
-
-### ✅ First successful battle (2026-04-02)
-**What happened:**
-```
-Connecting to Showdown server at ws://localhost:8000 ...
-(If this hangs or errors: start the server first with 'node pokemon-showdown start --no-security')
-Running 1 battle: RandomPlayer vs RandomPlayer ...
-Battle complete. Winner: P2
-Setup verified — poke-env <-> Showdown connection is working.
-```
-**Why it matters:** First proof the full stack works end-to-end — Python agent → WebSocket → Showdown → battle result. The "it's alive" moment.
+Curated moments and narrative beats for the YouTube video, maintained by [MEDIA].
 
 ---
 
-## Phase 2 — Environment
-*(pending)*
+## Act 1: Setup & First Signs of Life
 
-## Phase 3 — Baselines
+### The Stack
+- Pokemon Showdown (local server) + poke-env + MaskablePPO
+- Gen 1 random battles — no team building, pure battle skill
+- 153-dimensional observation space: HP, types, moves, boosts, status, levels, opponent info
 
-### ✅ MaxDamagePlayer vs RandomPlayer benchmark (2026-04-02)
-**What happened:**
+### MaxDamage Baseline: 99% vs Random
+Our heuristic bot (always picks highest-damage move) crushes RandomPlayer 99/100. This is the bar the RL agent must beat.
+
+### First PPO Gradient Update
 ```
-Running 100 battles: MaxDamagePlayer vs RandomPlayer ...
-
-Results (100 battles):
-  MaxDamagePlayer wins :  99 / 100  (99.0%)
-  RandomPlayer wins    :   1 / 100  (1.0%)
-
-ENVIRONMENT OK — win rate above 80% threshold.
+explained_variance = -1.34  (the agent has no clue what's happening)
+entropy_loss = -1.77        (picks actions randomly)
 ```
-**Why it matters:** Confirms the environment is working correctly end-to-end. 99% also sets a brutal bar for the RL agent — beating a type-aware heuristic >60% will require genuinely strategic play. The 1 loss is likely a catastrophic type matchup (e.g. Random got lucky team composition).
-
-## Phase 4 — PPO Training
-
-### ✅ First PPO gradient update (2026-04-02)
-**What happened:**
-```
-Using cuda device
-----------------------------
-| time/              |     |
-|    fps             | 77  |
-|    iterations      | 1   |
-|    total_timesteps | 128 |
-----------------------------
-------------------------------------------
-| train/                  |              |
-|    approx_kl            | 0.0035618674 |
-|    clip_fraction        | 0            |
-|    clip_range           | 0.2          |
-|    entropy_loss         | -1.77        |
-|    explained_variance   | -1.34        |
-|    learning_rate        | 0.0003       |
-|    loss                 | 0.0103       |
-|    n_updates            | 10           |
-|    policy_gradient_loss | -0.0128      |
-|    value_loss           | 0.128        |
-Smoke test PASSED
-```
-**Why it matters:** The agent is alive and learning on GPU. `explained_variance = -1.34` is exactly right for a fresh policy — the critic has no idea what's happening yet. This is the "it's learning" moment for Act 3 of the video. Contrast this number against the same metric after 500k steps.
-
-## Phase 5 — Self-Play
-*(pending)*
-
-### ✅ Win rate crossed 10% — step 10000 (2026-04-02)
-- Avg battle length: 65.8 turns
-- Switch rate: 46.8% of actions
-- Best move used: move_1 (17.6% of move actions)
-- **Why it matters for the video:** The agent crossed 10% win rate vs RandomPlayer at step 10,000. It is switching more than attacking — may be learning defensive play.
-
-### ✅ Win rate crossed 25% — step 10000 (2026-04-02)
-- Avg battle length: 65.8 turns
-- Switch rate: 46.8% of actions
-- Best move used: move_1 (17.6% of move actions)
-- **Why it matters for the video:** The agent crossed 25% win rate vs RandomPlayer at step 10,000. It is switching more than attacking — may be learning defensive play.
-
-### ✅ Win rate crossed 40% — step 10000 (2026-04-02)
-- Avg battle length: 65.8 turns
-- Switch rate: 46.8% of actions
-- Best move used: move_1 (17.6% of move actions)
-- **Why it matters for the video:** The agent crossed 40% win rate vs RandomPlayer at step 10,000. It is switching more than attacking — may be learning defensive play.
-
-### ✅ Win rate crossed 50% — step 10000 (2026-04-02)
-- Avg battle length: 65.8 turns
-- Switch rate: 46.8% of actions
-- Best move used: move_1 (17.6% of move actions)
-- **Why it matters for the video:** The agent crossed 50% win rate vs RandomPlayer at step 10,000. It is switching more than attacking — may be learning defensive play.
-
-### ✅ Win rate crossed 60% — step 20000 (2026-04-02)
-- Avg battle length: 55.4 turns
-- Switch rate: 42.2% of actions
-- Best move used: move_1 (19.6% of move actions)
-- **Why it matters for the video:** The agent crossed 60% win rate vs RandomPlayer at step 20,000. It is switching more than attacking — may be learning defensive play.
-
-### ✅ Win rate crossed 75% — step 20000 (2026-04-02)
-- Avg battle length: 55.4 turns
-- Switch rate: 42.2% of actions
-- Best move used: move_1 (19.6% of move actions)
-- **Why it matters for the video:** The agent crossed 75% win rate vs RandomPlayer at step 20,000. It is switching more than attacking — may be learning defensive play.
+**Hook:** Show this next to the same metrics after training. The contrast tells the story.
 
 ---
 
-### [MEDIA] Future Video Angles — logged 2026-04-02
+## Act 2: Learning to Beat Random (Phase A)
 
-#### Angle 1: How Close Is It to the Real Competitive RBY Meta?
-Once we have a trained agent in gen1ou format (not randombattle), compare its team choices, move priorities, and win conditions against documented competitive RBY meta:
-- Dominant Gen 1 OU Pokemon: Tauros, Chansey, Starmie, Alakazam, Exeggutor, Snorlax, Jynx, Slowbro, Lapras, Gengar
-- Top strategies: Wrap/Clamp/Bind abuse, Sleep + sweep, Amnesia sweepers, Body Slam paralysis spread
-- Does the agent rediscover these strategies from scratch, or find something different?
-- Hook: "I gave an AI 500,000 battles to learn Pokemon. Here's what it discovered."
+### Key Milestones (consistent across runs 010-013)
+| Step | Win Rate | Switch% | Avg Turns | What changed |
+|------|----------|---------|-----------|-------------|
+| 0 | ~50% | 60% | 70+ | Random baseline (6 switches, 4 moves = 60% switch by chance) |
+| 10k | 53% | 50% | 67 | First sign of learning — attacking more than switching |
+| 35k | 73% | 46% | 61 | Consistent improvement, games getting shorter |
+| 55k | 80% | 43% | 53 | Dominant — finishing games faster |
+| 70k | 90% | 41% | 49 | Mastery — crushing Random, ready to advance |
 
-#### Angle 2: The Ghost/Psychic Bug — What If Gamefreak Fixed It?
-Gen 1 shipped with a critical type chart bug: Ghost-type moves are IMMUNE to Psychic (0× instead of 2×). This makes Psychic the most broken type in the game — Starmie, Alakazam, Jynx, Slowbro, Exeggutor are all dominant partly because Ghost can't threaten them.
+**Narrative beat:** The agent discovered that attacking > switching, and learned to finish games.
 
-Other known Gen 1 bugs to investigate:
-- Focus Energy: supposed to 4× crit rate, actually reduces it to 1/256
-- 1/256 miss: all 100%-accurate moves have a 1/256 miss chance
-- Hyper Beam: no recharge if it KOs
-- Badge boosts: Gym badges permanently boost stats in battle
-- Special stat: Amnesia doubles Special Attack AND Special Defense simultaneously
+---
 
-Experiment: patch Showdown to fix Ghost→Psychic (0× → 2×) and retrain the agent. Does Gengar (Ghost/Poison) become viable? Does the Psychic-type stranglehold break?
-Hook: "What would competitive Pokemon look like if Gamefreak hadn't shipped a 30-year-old bug?"
+## Act 3: The MaxDamage Wall (the struggle)
 
-**Why this is compelling for video:** The agent has no preconceptions — it will discover the optimal meta purely from battle outcomes. If we fix the bug, it will show us the counterfactual history of Pokemon competitive play.
+### The Cliff — Repeated Across Every Run
+| Run | Approach | Phase A peak | Phase B result |
+|-----|----------|-------------|----------------|
+| run_010 | Epsilon-greedy, step triggers | 90% | Collapsed to 2%, recovered to 30-50%, stuck |
+| run_011 | Epsilon-greedy, smooth | 87% | Graduated too fast (only 4 evals) |
+| run_012 | Epsilon = f(win_rate), rate-limited | 90% | Collapsed to 2%, stuck at 20-35% |
+| run_013 | 10x reward shaping | 88% | Held 80% longer, still declined to 27-45% |
+
+**Hook:** "The agent learned to crush random opponents, then hit a wall it couldn't climb."
+
+### Why It's Stuck — Expert Panel Diagnosis (2026-04-02)
+Assembled panel: [RL], [SB3], [POKE-ENV], [RBY], [SE] + two external consultants (Principal RL Engineers, DeepMind/OpenAI backgrounds, former MIT professors).
+
+Key findings:
+1. **Reward signal 50x too weak** — per-step shaping was 0.01-0.05, drowned by terminal +/-1.0. Agent couldn't tell which moves were better. Fixed: 10x increase.
+2. **Epsilon-greedy creates bimodal opponent** — coin flip between fully random and fully strategic per turn. Not a coherent mid-skill player. Fixed: replaced with softmax/Boltzmann sampling.
+3. **StallPlayer was broken** — string vs enum comparison meant it never used status moves. Was a MaxDamage clone. Fixed.
+4. **ValueError catch injected fake losses** — poke-env desyncs returned -1.0 reward, poisoning training. Fixed: neutral 0.0.
+
+**Visual:** The debugging journey itself is content — "we assembled RL experts and they found the agent was basically training blind."
+
+### The Softmax Solution (2026-04-02)
+**Before (epsilon-greedy):** Per-turn coin flip — either 100% random OR 100% max-damage. Agent faces a schizophrenic opponent.
+
+**After (softmax/Boltzmann):** Moves sampled proportional to damage^(1/temperature). High temp = soft preferences. Low temp = near-deterministic. Every turn is coherent — opponent always somewhat prefers stronger moves.
+
+Formula: `prob(move_i) = damage_i^(1/temp) / sum(damage_j^(1/temp))`
+
+Temperature anneals from 2.0 (soft) to 0.1 (near-argmax) based on win rate over last 500 games.
+
+**Why it's better:** The agent faces a consistent "mid-skill" player that gradually gets sharper, not a random/expert coin flip.
+
+### Reward Shaping Decay (2026-04-02)
+Shaping starts at full strength (learn basics from intermediate rewards) and linearly decays to 0 over 5000 battles (eventually optimize purely for winning). Global across all phases — never resets.
+
+---
+
+## Act 4: The Fix (Pending Results)
+
+### Current Curriculum (run_014+)
+| Phase | Opponent | Difficulty |
+|-------|----------|-----------|
+| A | Random (60% switch) | Fixed, easy |
+| B | RandomAttacker (85% attack) | Fixed, medium |
+| C | SoftmaxDamage (temp 2.0 -> 0.1) | Smooth ramp to MaxDamage |
+| D | Mixed + frozen self-play | All opponents, endgame |
+
+### What to Capture
+- Save run_013 Phase B plateau (20-45%) as "before softmax"
+- Run with softmax opponent as "after"
+- Overlay training curves for the comparison
+
+---
+
+## Future Content Angles
+
+### Gen 1 Bug Experiments
+- Ghost/Psychic immunity bug: patch it, retrain, see if Gengar becomes viable
+- Focus Energy bug: actually reduces crit rate instead of boosting it
+- Hook: "What would competitive Pokemon look like without a 30-year-old bug?"
+
+### Self-Play Arc
+- Agent trains against frozen copies of itself
+- Does it discover known Gen 1 meta strategies? (Tauros dominance, Wrap abuse, Sleep + sweep)
+- Hook: "I gave an AI 500,000 battles to figure out Pokemon. Here's what it invented."
+
+### ✅ Win rate crossed 55% — step 17204 (2026-04-02)
+- Avg battle length: 64.2 turns
+- Switch rate: 47.8% of actions
+- Best move used: move_1 (15.8% of move actions)
+- **Why it matters for the video:** The agent crossed 55% win rate vs RandomPlayer at step 17,204. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 60% — step 17204 (2026-04-02)
+- Avg battle length: 64.2 turns
+- Switch rate: 47.8% of actions
+- Best move used: move_1 (15.8% of move actions)
+- **Why it matters for the video:** The agent crossed 60% win rate vs RandomPlayer at step 17,204. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 65% — step 26804 (2026-04-02)
+- Avg battle length: 63.5 turns
+- Switch rate: 46.2% of actions
+- Best move used: move_1 (16.0% of move actions)
+- **Why it matters for the video:** The agent crossed 65% win rate vs RandomPlayer at step 26,804. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 70% — step 26804 (2026-04-02)
+- Avg battle length: 63.5 turns
+- Switch rate: 46.2% of actions
+- Best move used: move_1 (16.0% of move actions)
+- **Why it matters for the video:** The agent crossed 70% win rate vs RandomPlayer at step 26,804. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 75% — step 35464 (2026-04-02)
+- Avg battle length: 59.8 turns
+- Switch rate: 44.6% of actions
+- Best move used: move_1 (16.1% of move actions)
+- **Why it matters for the video:** The agent crossed 75% win rate vs RandomPlayer at step 35,464. It is switching more than attacking — may be learning defensive play.
+
+### ✅ Win rate crossed 80% — step 49440 (2026-04-02)
+- Avg battle length: 53.1 turns
+- Switch rate: 39.8% of actions
+- Best move used: move_1 (21.4% of move actions)
+- **Why it matters for the video:** The agent crossed 80% win rate vs RandomPlayer at step 49,440. It heavily prefers attacking over switching — aggressive style.
+
+### ✅ Win rate crossed 85% — step 49440 (2026-04-02)
+- Avg battle length: 53.1 turns
+- Switch rate: 39.8% of actions
+- Best move used: move_1 (21.4% of move actions)
+- **Why it matters for the video:** The agent crossed 85% win rate vs RandomPlayer at step 49,440. It heavily prefers attacking over switching — aggressive style.
+
+### ✅ Win rate crossed 55% — step 100324 (2026-04-02)
+- Avg battle length: 43.6 turns
+- Switch rate: 30.7% of actions
+- Best move used: move_1 (18.9% of move actions)
+- **Why it matters for the video:** The agent crossed 55% win rate vs RandomPlayer at step 100,324. It heavily prefers attacking over switching — aggressive style.
+
+### ✅ Win rate crossed 60% — step 106668 (2026-04-02)
+- Avg battle length: 43.0 turns
+- Switch rate: 30.3% of actions
+- Best move used: move_1 (19.4% of move actions)
+- **Why it matters for the video:** The agent crossed 60% win rate vs RandomPlayer at step 106,668. It heavily prefers attacking over switching — aggressive style.
+
+### ✅ Win rate crossed 65% — step 144256 (2026-04-02)
+- Avg battle length: 41.4 turns
+- Switch rate: 28.8% of actions
+- Best move used: move_1 (21.3% of move actions)
+- **Why it matters for the video:** The agent crossed 65% win rate vs RandomPlayer at step 144,256. It heavily prefers attacking over switching — aggressive style.
+
+### ✅ Win rate crossed 70% — step 146320 (2026-04-02)
+- Avg battle length: 40.2 turns
+- Switch rate: 28.7% of actions
+- Best move used: move_1 (21.3% of move actions)
+- **Why it matters for the video:** The agent crossed 70% win rate vs RandomPlayer at step 146,320. It heavily prefers attacking over switching — aggressive style.
+
+### ✅ Win rate crossed 75% — step 194604 (2026-04-02)
+- Avg battle length: 38.5 turns
+- Switch rate: 27.4% of actions
+- Best move used: move_1 (21.5% of move actions)
+- **Why it matters for the video:** The agent crossed 75% win rate vs RandomPlayer at step 194,604. It heavily prefers attacking over switching — aggressive style.

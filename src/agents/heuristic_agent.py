@@ -54,6 +54,56 @@ def _type_advantage(pokemon, opponent) -> float:
 # Skill tested: agent must survive raw damage output
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# RandomAttackerPlayer — random move 85% of the time, random switch 15%
+# More realistic than pure Random (which switches 60% due to action space)
+# ---------------------------------------------------------------------------
+
+class RandomAttackerPlayer(Player):
+    def choose_move(self, battle):
+        if battle.available_moves and _random.random() < 0.85:
+            return self.create_order(_random.choice(battle.available_moves))
+        return self.choose_random_move(battle)
+
+
+# ---------------------------------------------------------------------------
+# SoftmaxDamagePlayer — samples moves proportional to damage^(1/temperature)
+# High temp = near-uniform, low temp = near-argmax (MaxDamage)
+# Switches randomly ~10% of turns. Temperature is mutable for annealing.
+# ---------------------------------------------------------------------------
+
+class SoftmaxDamagePlayer(Player):
+    def __init__(self, temperature: float = 2.0, **kwargs):
+        super().__init__(**kwargs)
+        self.temperature = temperature
+
+    def choose_move(self, battle):
+        # Small chance to switch randomly (realistic but exploitable)
+        if battle.available_switches and _random.random() < 0.10:
+            return self.create_order(_random.choice(battle.available_switches))
+
+        if battle.available_moves:
+            opp = battle.opponent_active_pokemon
+            damages = []
+            for m in battle.available_moves:
+                d = _expected_damage(m, opp)
+                damages.append(max(d, 10.0))  # floor for status moves
+
+            # Softmax with temperature
+            powered = [d ** (1.0 / max(self.temperature, 0.01)) for d in damages]
+            total = sum(powered)
+            probs = [p / total for p in powered]
+
+            chosen = _random.choices(battle.available_moves, weights=probs, k=1)[0]
+            return self.create_order(chosen)
+
+        if battle.available_switches:
+            return self.create_order(
+                max(battle.available_switches, key=lambda p: p.current_hp_fraction)
+            )
+        return self.choose_random_move(battle)
+
+
 class MaxDamagePlayer(Player):
     def choose_move(self, battle):
         if battle.available_moves:

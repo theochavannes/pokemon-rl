@@ -25,6 +25,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 os.chdir(_PROJECT_ROOT)
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+import torch
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
@@ -59,21 +60,29 @@ CURRICULUM = [
         opponent_type="random",
         phase_label="Random",
         target_wr=0.85,
-        max_steps=300_000,
+        max_steps=200_000,
         shaping_factor=1.0,
     ),
     dict(
         name="B",
-        opponent_type="epsilon_maxdamage",
-        phase_label="MaxDamage",
-        target_wr=0.70,
-        max_steps=400_000,
+        opponent_type="random_attacker",
+        phase_label="RandAttacker",
+        target_wr=0.80,
+        max_steps=200_000,
         shaping_factor=1.0,
-        epsilon_start=0.95,
-        epsilon_end=0.0,
     ),
     dict(
         name="C",
+        opponent_type="softmax_damage",
+        phase_label="SoftmaxDmg",
+        target_wr=0.70,
+        max_steps=400_000,
+        shaping_factor=1.0,
+        epsilon_start=2.0,   # temperature: 2.0 = soft, anneals to 0.1 = near-argmax
+        epsilon_end=0.1,
+    ),
+    dict(
+        name="D",
         opponent_type="mixed",
         phase_label="Mixed+Self",
         target_wr=0.60,
@@ -105,6 +114,7 @@ def main(new_run: bool = False) -> None:
         new_run=new_run,
     )
 
+    global_episodes = 0  # cumulative battle count across all phases
     os.makedirs(run.models_dir, exist_ok=True)
     os.makedirs(run.logs_dir, exist_ok=True)
 
@@ -192,6 +202,12 @@ def main(new_run: bool = False) -> None:
                     )
             else:
                 model = MaskablePPO(env=env, **{**PPO_KWARGS, "tensorboard_log": run.logs_dir})
+                # Bias policy toward moves (actions 6-9) over switches (actions 0-5).
+                # Moves get +1.0 logit → ~73% move probability at init vs 27% switch.
+                # Corrects the 6:4 switch:move structural imbalance in the action space.
+                # The bias is a learned parameter — PPO will adjust it naturally.
+                with torch.no_grad():
+                    model.policy.action_net.bias.data[6:] += 1.0
         else:
             model.set_env(env)
 
@@ -233,6 +249,8 @@ def main(new_run: bool = False) -> None:
             run_manager=run,
             phase_name=phase["name"],
             selfplay_path=selfplay_path,
+            global_episodes_offset=global_episodes,
+            env=env,
         )
         checkpoint_cb = CheckpointCallback(
             save_freq=50_000,
@@ -246,6 +264,9 @@ def main(new_run: bool = False) -> None:
             callback=[win_rate_cb, checkpoint_cb],
             reset_num_timesteps=(model is None and resume_path is None),
         )
+
+        # Carry cumulative episode count to next phase for shaping decay
+        global_episodes += win_rate_cb._total_episodes
 
         # Save phase completion + progress for resume
         current_epsilon = None

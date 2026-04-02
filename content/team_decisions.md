@@ -5,118 +5,104 @@ Updated after every significant team discussion.
 
 ---
 
-## 2026-04-02 — Initial Plan Review
+## 2026-04-02 — PPO vs DQN
 
-**Question:** PPO vs DQN for this project?
-
-**Debate:**
-- DQN uses experience replay (off-policy). When the opponent policy changes (self-play Phase 5), old transitions are stale and learned Q-values become wrong.
-- PPO is on-policy — discards old data each update. Required for stable self-play.
-- MaskablePPO has first-class action masking in sb3-contrib. DQN would need custom surgery.
-
-**Decision:** PPO. Closed.
+**Decision:** PPO (MaskablePPO). DQN's experience replay goes stale during self-play when opponent policy changes. PPO is on-policy and has first-class action masking in sb3-contrib.
 
 ---
 
-## 2026-04-02 — Observation Space: Partial Observability
+## 2026-04-02 — Observation Space Evolution
 
-**Question:** How to encode opponent's unrevealed team slots?
+| Version | Dims | What changed |
+|---------|------|-------------|
+| v1 | 64 | Basic: HP, boosts, status, types, moves |
+| v2 | 127 | Added bench types, opponent bench, accuracy, trapping |
+| v3 | 139 | Added acc/eva boosts, base stats, opponent revealed moves |
+| v4 (current) | 153 | Added Pokemon level (gen1randombattle has varying levels 58-100) |
 
-**Problem:** `-1` for unrevealed HP conflated "not seen yet" with "fainted" (both looked similar).
-
-**Decision:** Add explicit `revealed` binary flag per opponent slot (+6 dims).
-- Unrevealed slot: `[-1, 0, 0]` (HP=-1, fainted=0, revealed=0)
-- Revealed, alive: `[0.7, 0, 1]`
-- Fainted: `[0.0, 1, 1]`
-
-Obs space: **64 dims** (not 58 as originally specced).
+Transfer learning via `obs_transfer.py` handles loading old checkpoints into new obs spaces — zero-pads new input columns.
 
 ---
 
-## 2026-04-02 — VecEnv Strategy
+## 2026-04-02 — Reward Shaping Journey
 
-**Question:** SubprocVecEnv from the start or DummyVecEnv first?
+This was the single biggest source of problems. Timeline:
 
-**Problem:** SubprocVecEnv forks processes. Each subprocess needs:
-- Its own asyncio event loop
-- Unique bot usernames (can't have 4 agents all named "PPOAgent")
-- poke-env 0.13 supports this, but bugs are hard to diagnose across processes.
+| Attempt | Values | Result |
+|---------|--------|--------|
+| Sparse only | fainted=0, hp=0, victory=1.0 | 0% win rate. No gradient signal at all. |
+| First shaping | fainted=0.15, hp=0.10, victory=1.0 | Worked vs Random (~64%). Too weak vs MaxDamage. |
+| Reduced shaping | fainted=0.05, hp=0.05, status=0.02, victory=1.0 | Agent couldn't differentiate moves. Signal drowned by terminal reward. |
+| Expert panel recommendation | fainted=0.5, hp=0.5, status=0.1, victory=1.0 | **PENDING** — 10x increase to make intermediate events matter |
 
-**Decision:** `DummyVecEnv` (N=1) in Phase 4 for validation. Scale to `SubprocVecEnv` (N=4) only after single-env training is confirmed working.
-Upgrade path is a 2-line change in `train.py` (commented in code).
-
----
-
-## 2026-04-02 — Discount Factor γ
-
-**Question:** Does γ matter when all rewards are terminal (+1/-1)?
-
-**Analysis:**
-- With terminal-only rewards: `G_t = γ^(T−t) · (±1)`
-- γ controls how much signal reaches early moves
-- γ=0.99, 40-move battle: `G_0 ≈ 0.67` — adequate
-- γ=0.95: `G_0 ≈ 0.13` — early moves barely learn
-- γ=1.0: critic variance explodes (predicting ±1 from 40 steps out with no anchoring)
-
-**GAE interaction:** Effective decay is `(γλ)^l = (0.9405)^l`. After 40 moves: ~9% signal at move 1. Agent learns late-battle first, then mid, then early. Expected behavior.
-
-**Side effect:** γ<1 slightly rewards winning faster → mild aggressive-play prior. Acceptable.
-
-**Decision:** γ=0.99, λ=0.95 (SB3 defaults). No custom tuning needed.
+**Key insight from expert panel:** With fainted=0.05 and hp=0.05, total shaping across a full game sums to ~0.6. That's less than the 1.0 victory bonus, but the per-step signal is ~0.01 — too small for PPO to learn which moves cause the reward. 10x makes each KO worth 0.5, clearly visible in the gradient.
 
 ---
 
-## 2026-04-02 — Opponent Architecture in Training Env
+## 2026-04-02 — Opponent Architecture
 
-**Question:** Should the opponent player be created inside Gen1Env or passed in?
+### Heuristic Opponents (4 types)
+| Opponent | Strategy | Skill tested |
+|----------|----------|-------------|
+| MaxDamage | Always highest base_power x type_effectiveness | Survive raw offense |
+| TypeMatchup | Best type move, switches out of bad matchups | Handle type-aware play |
+| Stall | Status moves first (TWave, Toxic), then damage | Break through walls |
+| AggressiveSwitcher | Switches to type-counter aggressively | Punish switches |
 
-**Options:**
-1. Inside Gen1Env — self-contained, no external lifecycle management
-2. Passed in — more flexible but creates shared-state problems with SubprocVecEnv
+**Bug found:** StallPlayer used `m.category == "status"` (string) but poke-env uses `MoveCategory.STATUS` (enum). StallPlayer was actually a MaxDamage clone. Fixed.
 
-**Decision:** Opponent created inside `make_env()` factory function with `start_listening=False`.
-The `SingleAgentWrapper` injects the battle directly into the opponent — no WebSocket connection needed for the puppet opponent.
-Each env index gets unique usernames: `PPOAgent_0`, `RandomOpp_0`, `RandPuppet_0`.
-
----
-
-## 2026-04-02 — Observation Pipeline
-
-**Finding:** poke-env's `PokeEnv` returns observations as dicts:
-`{"observation": array(64,), "action_mask": array(N,)}`
-
-MaskablePPO needs a flat array observation and a separate `action_masks()` method.
-
-**Decision:** Add `SB3Wrapper(gymnasium.Wrapper)` that:
-- Unwraps dict obs → flat `array(64,)` for SB3
-- Stores last action mask
-- Exposes `action_masks() -> bool array` for MaskablePPO
-
-Full stack: `Gen1Env → SingleAgentWrapper → SB3Wrapper → DummyVecEnv → MaskablePPO`
+### Epsilon Blending
+Each heuristic opponent uses `_EpsilonMixin` — per-turn coin flip between frozen self-play policy and pure heuristic strategy. No random play once a frozen model is loaded.
 
 ---
 
-## 2026-04-02 — poke-env API Corrections (found during smoke test)
+## 2026-04-02 — Curriculum Evolution
 
-**Issue 1:** `observation_spaces` not set automatically.
-`PokeEnv.__init__` sets `action_spaces` but not `observation_spaces`. Subclasses must set it explicitly. Fixed by adding `__init__` to `Gen1Env` that sets `self.observation_spaces = {agent: self.describe_embedding() for agent in self.possible_agents}`.
+### v1: Sequential phases (Random -> MaxDamage)
+**Problem:** Agent graduates Phase A, hits MaxDamage wall (85% -> 2%), never recovers.
+**Root cause:** Skills learned vs Random don't transfer. No gradual difficulty ramp.
 
-**Issue 2:** `calc_reward` signature changed in poke-env 0.13.
-Original plan used `calc_reward(self, last_battle, current_battle)`. Actual API is `calc_reward(self, battle)` — single argument. Fixed.
+### v2: Epsilon annealing with step triggers
+**Problem:** Epsilon drops 0.1 per trigger, death spiral. Agent briefly hits threshold, epsilon drops, win rate crashes, slowly recovers, hits threshold again, epsilon drops again.
 
-**Issue 3:** Stale battle state on reconnect.
-If a run crashes mid-battle, the Showdown server keeps the battle alive. Reconnecting with the same username restores the battle, causing `reset_battles()` to fail on the next run. Fixed by appending a 6-char random suffix to all usernames in `make_env()`.
+### v3: Mixed opponents with smooth epsilon
+**Problem:** Phases graduated before epsilon could anneal (win rate target hit while opponents still 95% random).
+
+### v4: Epsilon = f(win_rate) with rate limiting
+- `epsilon = 1.0 - win_rate_over_500_games`
+- Max drop 0.03 per eval, max rise 0.05 per eval
+- Phase can't graduate until epsilon reaches 0.0
+**Status:** Still stuck at 20-35% vs MaxDamage even with epsilon 0.68
+
+### v5 (proposed): 10x reward shaping
+Expert panel diagnosis: reward signal too weak by an order of magnitude. Agent can't learn which moves are better because per-step reward differences are ~0.01.
 
 ---
 
-## 2026-04-02 — Win Rate Tracking
+## 2026-04-02 — Parallel Training
 
-**Question:** How to evaluate win rate during training without a separate eval loop?
+- DummyVecEnv (not SubprocVecEnv) because epsilon annealing needs opponent object access
+- 4 envs currently (laptop has 20 CPU cores, RTX 4050 6GB — plenty of headroom)
+- Each env gets a different opponent from the mixed pool
+- Self-play opponent on env3, heuristics on env0-2
 
-**Decision:** `WinRateCallback` reads terminal episode rewards from SB3's `infos` dict.
-SB3 automatically adds `{"episode": {"r": total_reward}}` when an episode ends.
-- `r > 0` → win
-- `r < 0` → loss
+---
 
-Window of last 100 episodes. Logged to TensorBoard every 10k steps.
-Best model saved whenever win rate improves (with minimum 50-episode window).
+## 2026-04-02 — PPO Hyperparameter History
+
+| Config | n_steps | batch | epochs | ent_coef | net_arch | Result |
+|--------|---------|-------|--------|----------|----------|--------|
+| Default | 2048 | 64 | 10 | 0.0 | [64,64] | Worked vs Random, stuck vs MaxDamage |
+| Big batch | 4096 | 512 | 4 | 0.01 | [128,128] | Learned slower than default |
+| Bigger net | 4096 | 1024 | 3 | 0.05 | [256,256] | Stuck at 10-20%, too many params |
+| Reverted | 2048 | 64 | 10 | 0.0 | [64,64] | Best performer so far |
+
+**Lesson:** The default SB3 config for PPO was closest to optimal. Bigger networks and batches didn't help — the bottleneck was reward signal, not model capacity.
+
+---
+
+## 2026-04-02 — Known poke-env Issues
+
+1. **Disable desync:** poke-env occasionally sends moves that were Disabled mid-turn. Showdown rejects and picks default action. Non-fatal.
+2. **Switch-to-active:** Action mask doesn't always filter "switch to already active Pokemon." Showdown rejects. Non-fatal.
+3. **Forced switch desync:** `order_to_action` raises ValueError when opponent's forced switch doesn't match valid orders. Caught in SB3Wrapper, returns neutral reward (0.0).

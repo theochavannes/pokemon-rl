@@ -67,29 +67,37 @@ python scripts/verify_setup.py
 
 ## Training
 
-### Mixed-opponent training
+### 4-phase curriculum
 
-The agent trains against 4 opponent types simultaneously, each with per-turn epsilon-greedy randomness. As the agent's win rate improves, epsilon anneals from 0.8 to 0.0, making opponents progressively harder.
+The agent progresses through increasingly difficult opponents. Each phase auto-advances when the win rate target is sustained at full difficulty.
 
-| Opponent | Strategy | What it teaches |
-|---|---|---|
-| MaxDamage | Always picks highest-damage move | Survive raw offense |
-| TypeMatchup | Type-effective moves, switches out of bad matchups | Handle type-aware play |
-| Stall | Prioritizes status moves (TWave, Toxic, Hypnosis) | Break through walls |
-| AggressiveSwitcher | Switches to type-counter, then attacks | Punish switches |
+| Phase | Opponent | How it works | Target |
+|---|---|---|---|
+| A | Random | Uniform random actions (baseline) | 85% |
+| B | RandomAttacker | Random moves 85%, random switch 15% (realistic) | 80% |
+| C | SoftmaxDamage | Moves sampled proportional to damage^(1/temp). Temperature anneals from 2.0 (soft) to 0.1 (near-argmax MaxDamage) based on win rate | 70% at temp=0.1 |
+| D | Mixed+Self | All heuristic opponents + frozen self-play. Smooth difficulty via temperature/epsilon annealing | 60% |
 
 ```bash
 python src/train.py --new-run    # start fresh
 python src/train.py              # resume latest run
 ```
 
-**Reward shaping** (annealed over training):
-- `hp_value=0.15` — reward for dealing damage, penalty for taking it
-- `fainted_value=0.15` — reward for KOs, penalty for own Pokemon fainting
-- `status_value=0.05` — reward for inflicting status conditions
-- `victory_value=1.0` — winning dominates
+**Heuristic opponents** (used in Phase D mixed pool):
+| Opponent | Strategy |
+|---|---|
+| MaxDamage | Always picks highest base_power x type_effectiveness move |
+| TypeMatchup | Best type move, switches out of bad matchups |
+| Stall | Status moves first (TWave, Toxic), then damage |
+| AggressiveSwitcher | Switches to type-counter aggressively |
 
-**Self-play** (after mixed training):
+**Reward shaping** (linearly decays to 0 over 5000 battles):
+- `hp_value=0.5` — reward for dealing damage, penalty for taking it
+- `fainted_value=0.5` — reward for KOs, penalty for own Pokemon fainting
+- `status_value=0.1` — reward for inflicting status conditions
+- `victory_value=3.0` — winning always dominates
+
+**Self-play** (after curriculum):
 ```bash
 python src/selfplay_train.py
 ```

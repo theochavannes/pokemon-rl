@@ -69,11 +69,17 @@ class WinRateCallback(BaseCallback):
         phase_name: str = "",
         selfplay_path: str | None = None,
         selfplay_update_freq: int = 200,
+        shaping_decay_battles: int = 5000,
+        global_episodes_offset: int = 0,
+        env=None,
     ):
         super().__init__(verbose)
         self.selfplay_path = selfplay_path
         self.selfplay_update_freq = selfplay_update_freq
         self._last_selfplay_update: int = 0
+        self.shaping_decay_battles = shaping_decay_battles
+        self.global_episodes_offset = global_episodes_offset  # battles from previous phases
+        self._env = env
         self.window = window
         self.eval_freq = eval_freq
         self.eval_freq_episodes = eval_freq_episodes
@@ -164,15 +170,20 @@ class WinRateCallback(BaseCallback):
                 self.stop_at_win_rate is not None
                 and len(self._episode_rewards) >= self.window
             ):
-                # Check if epsilon has fully annealed (if applicable)
+                # Check if difficulty has fully annealed (epsilon or temperature)
                 epsilon_done = True
                 if self.epsilon_schedule and self.opponents:
-                    _, eps_end = self.epsilon_schedule
-                    if hasattr(self.opponents[0], "epsilon"):
-                        epsilon_done = self.opponents[0].epsilon <= eps_end + 0.01
+                    _, end_val = self.epsilon_schedule
+                    opp = self.opponents[0]
+                    if hasattr(opp, "temperature"):
+                        epsilon_done = opp.temperature <= end_val + 0.05
                         if not epsilon_done and self.verbose and not hasattr(self, "_eps_warned"):
-                            current_eps = self.opponents[0].epsilon
-                            print(f"  [Curriculum] epsilon still at {current_eps:.2f} — phase won't end until epsilon reaches {eps_end:.2f}")
+                            print(f"  [Curriculum] temperature still at {opp.temperature:.2f} — phase won't end until {end_val:.2f}")
+                            self._eps_warned = True
+                    elif hasattr(opp, "epsilon"):
+                        epsilon_done = opp.epsilon <= end_val + 0.01
+                        if not epsilon_done and self.verbose and not hasattr(self, "_eps_warned"):
+                            print(f"  [Curriculum] epsilon still at {opp.epsilon:.2f} — phase won't end until {end_val:.2f}")
                             self._eps_warned = True
 
                 win_rate = float(np.mean([1.0 if r >= 0.5 else 0.0 for r in self._episode_rewards]))
@@ -205,6 +216,9 @@ class WinRateCallback(BaseCallback):
         self.logger.record("train/switch_rate_pct", float(action_pct[:6].sum()), exclude=_tb_only)
         self.logger.record("train/move_rate_pct", float(action_pct[6:].sum()), exclude=_tb_only)
         self.logger.dump(self.num_timesteps)
+
+        # Decay reward shaping based on total battles
+        self._decay_shaping()
 
         # Anneal opponent epsilon based on win rate
         self._maybe_anneal_epsilon(win_rate)
@@ -281,27 +295,13 @@ class WinRateCallback(BaseCallback):
             f.write(row)
 
     def _check_win_rate_milestones(self, win_rate, avg_length, action_pct) -> None:
-        """Log to hooks.md when win rate crosses a threshold for the first time."""
+        """Print milestone to console (hooks.md is maintained manually by [MEDIA])."""
         for threshold in _WIN_RATE_MILESTONES:
             if win_rate >= threshold and threshold not in self._crossed_milestones:
                 self._crossed_milestones.add(threshold)
-                label = f"{int(threshold * 100)}%"
-                switch_pct = action_pct[:6].sum()
-                note = (
-                    f"\n### ✅ Win rate crossed {label} — step {self.num_timesteps} "
-                    f"({datetime.now().strftime('%Y-%m-%d')})\n"
-                    f"- Avg battle length: {avg_length:.1f} turns\n"
-                    f"- Switch rate: {switch_pct:.1f}% of actions\n"
-                    f"- Best move used: move_{int(np.argmax(self._action_counts[6:])) + 1} "
-                    f"({action_pct[6 + np.argmax(self._action_counts[6:])]:.1f}% of move actions)\n"
-                    f"- **Why it matters for the video:** The agent crossed {label} win rate "
-                    f"vs RandomPlayer at step {self.num_timesteps:,}. "
-                    f"{'It is switching more than attacking — may be learning defensive play.' if switch_pct > 40 else 'It heavily prefers attacking over switching — aggressive style.'}\n"
-                )
-                with open(self.hooks_log, "a", encoding="utf-8") as f:
-                    f.write(note)
                 if self.verbose:
-                    print(f"[MEDIA]  Win rate milestone {label} reached at step {self.num_timesteps} → logged to hooks.md")
+                    label = f"{int(threshold * 100)}%"
+                    print(f"  [Milestone] Win rate crossed {label} at step {self.num_timesteps:,}")
 
     def _maybe_snapshot_replays(self, win_rate: float) -> None:
         """Copy 3 most recent replays to notable/ at milestone steps."""
@@ -365,6 +365,26 @@ class WinRateCallback(BaseCallback):
         with open(registry_path, "w") as f:
             json.dump(registry, f, indent=2)
 
+    def _decay_shaping(self) -> None:
+        """Linearly decay reward shaping from 1.0 to 0.0 over shaping_decay_battles (global)."""
+        if not self._env or not self.shaping_decay_battles:
+            return
+        global_battles = self.global_episodes_offset + self._total_episodes
+        progress = min(global_battles / self.shaping_decay_battles, 1.0)
+        new_factor = max(1.0 - progress, 0.0)
+
+        # Update shaping_factor on all env instances
+        if hasattr(self._env, "envs"):
+            for e in self._env.envs:
+                # Navigate wrapper chain: Monitor -> SB3Wrapper -> SingleAgentWrapper -> Gen1Env
+                inner = e
+                while hasattr(inner, "env"):
+                    inner = inner.env
+                if hasattr(inner, "shaping_factor"):
+                    inner.shaping_factor = new_factor
+        if self.verbose and self._total_episodes % 200 == 0:
+            print(f"  [Shaping] factor={new_factor:.2f} (battle {self._total_episodes}/{self.shaping_decay_battles})")
+
     def _maybe_anneal_epsilon(self, win_rate: float) -> None:
         """Set opponent epsilon as a continuous function of win rate.
 
@@ -382,19 +402,32 @@ class WinRateCallback(BaseCallback):
             return
 
         eps_win_rate = float(np.mean([1.0 if r >= 0.5 else 0.0 for r in self._epsilon_rewards]))
-        target_eps = max(min(1.0 - eps_win_rate, eps_start), eps_end)
-        current_eps = self.opponents[0].epsilon
 
-        # Clamp: epsilon can drop at most 0.03 per eval to prevent sudden difficulty spikes
-        new_eps = max(target_eps, current_eps - 0.03)
-        # But can always go back up if agent is struggling
-        new_eps = min(new_eps, max(target_eps, current_eps + 0.05))
-
-        if abs(new_eps - current_eps) > 0.005:
-            for opp in self.opponents:
-                opp.epsilon = new_eps
-            if self.verbose:
-                print(f"  [Curriculum] opponent epsilon: {current_eps:.2f} → {new_eps:.2f} (wr500={eps_win_rate:.2f})")
+        # Handle both epsilon-based and temperature-based opponents
+        if hasattr(self.opponents[0], "temperature"):
+            # Softmax: temperature = 2.0 at wr=0%, 0.1 at wr=100%
+            target_temp = 2.0 * (1.0 - eps_win_rate) + 0.1 * eps_win_rate
+            current_temp = self.opponents[0].temperature
+            # Rate limit: max change 0.1 per eval
+            new_temp = current_temp + max(min(target_temp - current_temp, 0.1), -0.1)
+            if abs(new_temp - current_temp) > 0.01:
+                for opp in self.opponents:
+                    if hasattr(opp, "temperature"):
+                        opp.temperature = new_temp
+                if self.verbose:
+                    print(f"  [Curriculum] temperature: {current_temp:.2f} → {new_temp:.2f} (wr500={eps_win_rate:.2f})")
+        elif hasattr(self.opponents[0], "epsilon"):
+            target_eps = max(min(1.0 - eps_win_rate, eps_start), eps_end)
+            current_eps = self.opponents[0].epsilon
+            # Clamp: max drop 0.03, max rise 0.05
+            new_eps = max(target_eps, current_eps - 0.03)
+            new_eps = min(new_eps, max(target_eps, current_eps + 0.05))
+            if abs(new_eps - current_eps) > 0.005:
+                for opp in self.opponents:
+                    if hasattr(opp, "epsilon"):
+                        opp.epsilon = new_eps
+                if self.verbose:
+                    print(f"  [Curriculum] epsilon: {current_eps:.2f} → {new_eps:.2f} (wr500={eps_win_rate:.2f})")
 
     def _nearest_milestone(self) -> int | None:
         for m in _REPLAY_MILESTONES:
