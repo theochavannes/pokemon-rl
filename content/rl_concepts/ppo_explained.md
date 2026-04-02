@@ -143,12 +143,43 @@ Repeat until 500k steps:
 
 ---
 
-## Open Question (from [REVIEW])
+## The γ Question — Resolved
 
-> The discount factor γ < 1 makes agents prefer faster rewards.
-> But our reward is always terminal (+1 or −1 at end of battle).
-> **Does γ even matter here? What value should we use?**
+> With only terminal rewards, does γ matter?
 
-Hint: think about what γ does to the advantage estimates
-when every intermediate reward is 0.
+**Yes.** With a battle of length T, the return at timestep t is:
+```
+G_t = γ^(T−t) · (±1)
+```
+γ controls how much the terminal signal decays backward through time.
+
+```
+γ = 0.99, 40-move battle:  G_0 = 0.99^40 ≈ 0.67   ✅ signal reaches early moves
+γ = 0.95, 40-move battle:  G_0 = 0.95^40 ≈ 0.13   ⚠️  early moves barely learn
+γ = 1.00                                            ❌  critic variance explodes
+```
+
+**But the real parameter pair is γλ (gamma × GAE lambda):**
+
+PPO uses Generalized Advantage Estimation (GAE):
+```
+A_t^GAE = Σ (γλ)^l · δ_{t+l}
+where δ_t = r_t + γV(s_{t+1}) − V(s_t)  (TD error)
+```
+
+With sparse terminal rewards, δ_t ≈ −V(s_t) for every mid-battle step.
+The advantage signal decays at rate (γλ)^l, not just γ^l.
+
+**With SB3 defaults (γ=0.99, λ=0.95):**
+```
+γλ = 0.9405
+Over 40 moves: (0.9405)^40 ≈ 0.09
+→ Move 1's advantage = ~9% of the terminal signal
+→ Agent learns late-battle first, then mid, then early — expected behavior
+```
+
+**Decision: keep SB3 defaults. No custom tuning needed for Phase 4.**
+
+Side effect: γ < 1 creates a subtle prior toward winning faster (aggressive play).
+This is acceptable — possibly even beneficial for Gen 1 offensive meta.
 ```

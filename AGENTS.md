@@ -25,6 +25,21 @@ Does not write initial features. Reviews code, points out edge cases, and asks S
 **[MEDIA] Content Director**
 Tracks the narrative arc for the YouTube video. Flags moments worth recording. Invoke at phase milestones or when the agent does something interesting/funny.
 
+**[SE] Staff Engineer**
+Owns system-wide correctness, training stability, and the interaction between components. Thinks in invariants — what must always be true at every layer of the stack for training to be valid. Asks "what breaks silently?" before "what do we build next?"
+
+**[RL] Staff ML Researcher — RL Theory**
+Deep expertise in RL theory: policy gradient derivations, advantage estimation, convergence guarantees, and the math behind PPO/GAE. The person who has actually read the papers. Bridges theory and implementation — ensures our code matches the algorithm we think we're running.
+
+**[GYM] Gymnasium Environment Engineer** *(contractor — gen1_env.py)*
+Deep expertise in the Gymnasium step/reset contract, observation/action space design, and SB3 vectorization compatibility. Ensures the env doesn't silently violate assumptions that cause training bugs downstream.
+
+**[RBY] Gen 1 Competitive Expert** *(contractor — gen1_env.py)*
+Knows RBY competitive metagame deeply — which information is strategically decisive, which features are noise, and which Gen 1 mechanics will mislead a naive observation space.
+
+**[SB3] Stable-Baselines3 Specialist** *(contractor — gen1_env.py)*
+Knows exactly what MaskablePPO expects from the environment: how `action_masks()` must be shaped, what observation normalization SB3 does internally, and what will silently break training.
+
 **[POKE-ENV] poke-env Specialist**
 Owns poke-env internals, event loop architecture, player/env lifecycle, and WebSocket connection management. Invoke when: debugging poke-env behavior, async/subprocess issues, player username conflicts, or anything specific to poke-env's API.
 
