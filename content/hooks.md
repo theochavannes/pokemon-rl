@@ -23,7 +23,19 @@ Setup verified — poke-env <-> Showdown connection is working.
 *(pending)*
 
 ## Phase 3 — Baselines
-*(pending)*
+
+### ✅ MaxDamagePlayer vs RandomPlayer benchmark (2026-04-02)
+**What happened:**
+```
+Running 100 battles: MaxDamagePlayer vs RandomPlayer ...
+
+Results (100 battles):
+  MaxDamagePlayer wins :  99 / 100  (99.0%)
+  RandomPlayer wins    :   1 / 100  (1.0%)
+
+ENVIRONMENT OK — win rate above 80% threshold.
+```
+**Why it matters:** Confirms the environment is working correctly end-to-end. 99% also sets a brutal bar for the RL agent — beating a type-aware heuristic >60% will require genuinely strategic play. The 1 loss is likely a catastrophic type matchup (e.g. Random got lucky team composition).
 
 ## Phase 4 — PPO Training
 *(pending)*
