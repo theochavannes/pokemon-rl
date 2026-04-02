@@ -27,7 +27,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import CheckpointCallback
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from src.callbacks import WinRateCallback
 from src.env.gen1_env import make_env
@@ -39,34 +39,30 @@ from src.run_manager import RunManager
 # ---------------------------------------------------------------------------
 
 BATTLE_FORMAT = "gen1randombattle"
-N_ENVS = 1
+N_ENVS = 4
 
 PPO_KWARGS = dict(
     policy="MlpPolicy",
     n_steps=2048,
-    batch_size=64,
+    batch_size=128,
     n_epochs=10,
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
     learning_rate=3e-4,
-    verbose=0,
+    verbose=1,
 )
 
 CURRICULUM = [
     dict(
         name="A",
-        opponent_type="random",
-        phase_label="Random",
-        target_wr=0.75,
-        max_steps=150_000,
-    ),
-    dict(
-        name="B",
-        opponent_type="maxdamage",
-        phase_label="MaxDamage",
+        opponent_type="mixed",
+        phase_label="Mixed",
         target_wr=0.65,
-        max_steps=200_000,
+        max_steps=500_000,
+        shaping_factor=1.0,
+        epsilon_start=0.8,       # all opponents start mostly random
+        epsilon_end=0.0,         # anneal to pure strategy as agent improves
     ),
 ]
 
@@ -101,10 +97,14 @@ def main(new_run: bool = False) -> None:
 
         print(f"\n{'='*60}")
         print(f"  {run.run_id} — Phase {phase['name']}: vs {phase['phase_label']}")
-        print(f"  Target: {phase['target_wr']*100:.0f}%  |  Cap: {phase['max_steps']:,} steps")
+        shaping = phase.get("shaping_factor", 1.0)
+        epsilon_start = phase.get("epsilon_start")
+        print(f"  Target: {phase['target_wr']*100:.0f}%  |  Cap: {phase['max_steps']:,} steps (~{phase['max_steps']//75:,} battles)")
+        print(f"  Reward shaping: {shaping:.0%}")
+        if epsilon_start is not None:
+            print(f"  Opponent ε: {epsilon_start} → {phase.get('epsilon_end', 0.0)} (anneals on win rate)")
         print(f"  Replays → {replay_dir}")
         print(f"{'='*60}\n")
-
         env_fns = [
             partial(
                 make_env,
@@ -112,10 +112,16 @@ def main(new_run: bool = False) -> None:
                 battle_format=BATTLE_FORMAT,
                 save_replays=replay_dir,
                 opponent_type=phase["opponent_type"],
+                shaping_factor=shaping,
+                opponent_epsilon=epsilon_start or 0.8,
             )
             for i in range(N_ENVS)
         ]
-        env = DummyVecEnv(env_fns)
+        # DummyVecEnv when we need opponent access (epsilon annealing), SubprocVecEnv otherwise
+        if epsilon_start is not None or N_ENVS == 1:
+            env = DummyVecEnv(env_fns)
+        else:
+            env = SubprocVecEnv(env_fns)
 
         if model is None:
             if resume_path:
@@ -133,22 +139,46 @@ def main(new_run: bool = False) -> None:
                         env=env,
                         ppo_kwargs={**PPO_KWARGS, "tensorboard_log": run.logs_dir},
                     )
-                model.verbose = 0
             else:
                 model = MaskablePPO(env=env, **{**PPO_KWARGS, "tensorboard_log": run.logs_dir})
         else:
             model.set_env(env)
+
+        # Print model info
+        obs_dim = env.observation_space.shape[0]
+        act_dim = env.action_space.n
+        total_params = sum(p.numel() for p in model.policy.parameters())
+        print(f"  Obs space : {obs_dim} dims")
+        print(f"  Action sp : {act_dim} actions (4 moves + 6 switches)")
+        print(f"  Network   : {total_params:,} parameters")
+        print(f"  Rollout   : {PPO_KWARGS['n_steps']} steps × {N_ENVS} env(s)")
+        print(f"  Eval every: 50 battles")
+        print()
+
+        # Collect opponent refs for epsilon annealing (only works with DummyVecEnv)
+        opponents = []
+        if epsilon_start is not None and hasattr(env, "envs"):
+            for e in env.envs:
+                if hasattr(e, "_opponent"):
+                    opponents.append(e._opponent)
+
+        eps_sched = None
+        if epsilon_start is not None:
+            eps_sched = (epsilon_start, phase.get("epsilon_end", 0.0))
 
         win_rate_cb = WinRateCallback(
             window=100,
             eval_freq=10_000,
             save_path=run.models_dir,
             replay_dir=replay_dir,
-            notable_dir="replays/notable",
+            notable_dir=str(Path(run.run_dir) / "replays" / "notable"),
             verbose=1,
             stop_at_win_rate=phase["target_wr"],
             phase_label=phase["phase_label"],
             training_log_path=run.training_log,
+            run_id=run.run_id,
+            epsilon_schedule=eps_sched,
+            opponents=opponents,
         )
         checkpoint_cb = CheckpointCallback(
             save_freq=50_000,

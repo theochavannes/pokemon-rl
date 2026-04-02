@@ -11,7 +11,7 @@ obs_dim. All deeper layers are hidden×hidden and are copied unchanged.
 Usage:
     model = load_with_expanded_obs(
         old_path="runs/run_001/models/best_model",
-        new_obs_dim=139,
+        new_obs_dim=153,
         env=env,
         ppo_kwargs=PPO_KWARGS,
     )
