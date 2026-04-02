@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<!-- version 1 -->
+<title>battle-gen1randombattle-2756</title>
+<style>
+    html,
+    body {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+        margin: 0;
+        padding: 0;
+    }
+
+    body {
+        padding: 12px 0;
+    }
+
+    .battle-log {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+    }
+
+    .battle-log-inline {
+        border: 1px solid #AAAAAA;
+        background: #EEF2F5;
+        color: black;
+        max-width: 640px;
+        margin: 0 auto 80px;
+        padding-bottom: 5px;
+    }
+
+    .battle-log .inner {
+        padding: 4px 8px 0px 8px;
+    }
+
+    .battle-log .inner-preempt {
+        padding: 0 8px 4px 8px;
+    }
+
+    .battle-log .inner-after {
+        margin-top: 0.5em;
+    }
+
+    .battle-log h2 {
+        margin: 0.5em -8px;
+        padding: 4px 8px;
+        border: 1px solid #AAAAAA;
+        background: #E0E7EA;
+        border-left: 0;
+        border-right: 0;
+        font-family: Verdana, sans-serif;
+        font-size: 13pt;
+    }
+
+    .backprop {
+        top: 0;
+    }
+
+    .battle-log .chat {
+        vertical-align: middle;
+        padding: 3px 0 3px 0;
+        font-size: 8pt;
+    }
+
+    .battle-log .chat strong {
+        color: #40576A;
+    }
+
+    .battle-log .chat em {
+        padding: 1px 4px 1px 3px;
+        color: #000000;
+        font-style: normal;
+    }
+
+    .chat.mine {
+        background: rgba(0, 0, 0, 0.05);
+        margin-left: -8px;
+        margin-right: -8px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .spoiler {
+        color: #BBBBBB;
+        background: #BBBBBB;
+        padding: 0px 3px;
+    }
+
+    .spoiler:hover,
+    .spoiler:active,
+    .spoiler-shown {
+        color: #000000;
+        background: #E2E2E2;
+        padding: 0px 3px;
+    }
+
+    .spoiler a {
+        color: #BBBBBB;
+    }
+
+    .spoiler:hover a,
+    .spoiler:active a,
+    .spoiler-shown a {
+        color: #2288CC;
+    }
+
+    .chat code,
+    .chat .spoiler:hover code,
+    .chat .spoiler:active code,
+    .chat .spoiler-shown code {
+        border: 1px solid #C0C0C0;
+        background: #EEEEEE;
+        color: black;
+        padding: 0 2px;
+    }
+
+    .chat .spoiler code {
+        border: 1px solid #CCCCCC;
+        background: #CCCCCC;
+        color: #CCCCCC;
+    }
+
+    .battle-log .rated {
+        padding: 3px 4px;
+    }
+
+    .battle-log .rated strong {
+        color: white;
+        background: #89A;
+        padding: 1px 4px;
+        border-radius: 4px;
+    }
+
+    .spacer {
+        margin-top: 0.5em;
+    }
+
+    .message-announce {
+        background: #6688AA;
+        color: white;
+        padding: 1px 4px 2px;
+    }
+
+    .message-announce a,
+    .broadcast-green a,
+    .broadcast-blue a,
+    .broadcast-red a {
+        color: #DDEEFF;
+    }
+
+    .broadcast-green {
+        background-color: #559955;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .broadcast-blue {
+        background-color: #6688AA;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .infobox {
+        border: 1px solid #6688AA;
+        padding: 2px 4px;
+    }
+
+    .infobox-limited {
+        max-height: 200px;
+        overflow: auto;
+        overflow-x: hidden;
+    }
+
+    .broadcast-red {
+        background-color: #AA5544;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .message-learn-canlearn {
+        font-weight: bold;
+        color: #228822;
+        text-decoration: underline;
+    }
+
+    .message-learn-cannotlearn {
+        font-weight: bold;
+        color: #CC2222;
+        text-decoration: underline;
+    }
+
+    .message-effect-weak {
+        font-weight: bold;
+        color: #CC2222;
+    }
+
+    .message-effect-resist {
+        font-weight: bold;
+        color: #6688AA;
+    }
+
+    .message-effect-immune {
+        font-weight: bold;
+        color: #666666;
+    }
+
+    .message-learn-list {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    .message-throttle-notice,
+    .message-error {
+        color: #992222;
+    }
+
+    .message-overflow,
+    .chat small.message-overflow {
+        font-size: 0pt;
+    }
+
+    .message-overflow::before {
+        font-size: 9pt;
+        content: '...';
+    }
+
+    .subtle {
+        color: #3A4A66;
+    }
+</style>
+<div class="wrapper replay-wrapper" style="max-width:1180px;margin:0 auto">
+    <input type="hidden" name="replayid" value="unregisteredserver-gen8randombattle-320064" />
+    <div class="battle"></div>
+    <div class="battle-log"></div>
+    <div class="replay-controls"></div>
+    <div class="replay-controls-2"></div>
+    <h1 style="font-weight:normal;text-align:center"><strong>poke-env battle replay</strong><br />battle-gen1randombattle-2756<br /><a
+            href="http://pokemonshowdown.com/users/randomplayer1" class="subtle" target="_blank">RandOpp0phdepc</a>
+        vs. <a href="http://pokemonshowdown.com/users/randomplayer2" class="subtle"
+            target="_blank">PPOAgent0phdepc</a></h1>
+    <script type="text/plain" class="battle-log-data">
+    >battle-gen1randombattle-2756
+|init|battle
+|title|PPOAgent0phdepc vs. RandOpp0phdepc
+|j|☆PPOAgent0phdepc
+|j|☆RandOpp0phdepc
+|gametype|singles
+|player|p1|PPOAgent0phdepc|170|
+|player|p2|RandOpp0phdepc|169|
+|gen|1
+|tier|[Gen 1] Random Battle
+|rule|Desync Clause Mod: Desyncs changed to move failure.
+|rule|HP Percentage Mod: HP is shown in percentages
+|rule|Endless Battle Clause: Forcing endless battles is banned
+|rule|Sleep Clause Mod: Limit one foe put to sleep
+|rule|Freeze Clause Mod: Limit one foe frozen
+|rule|Species Clause: Limit one of each Pokémon
+|rule|OHKO Clause: OHKO moves are banned
+|rule|Evasion Moves Clause: Evasion moves are banned
+|
+|teamsize|p1|6
+|teamsize|p2|6
+|start
+|switch|p1a: Magnemite|Magnemite, L88|100/100
+|switch|p2a: Kingler|Kingler, L76|240/240
+|turn|1
+|
+|switch|p2a: Nidoran-M|Nidoran-M, L90|266/266
+|move|p1a: Magnemite|Thunder|p2a: Nidoran-M|[miss]
+|-miss|p1a: Magnemite
+|
+|upkeep
+|turn|2
+|
+|switch|p2a: Sandslash|Sandslash, L76|270/270
+|move|p1a: Magnemite|Thunderbolt|p2a: Sandslash
+|-immune|p2a: Sandslash
+|
+|upkeep
+|turn|3
+|
+|move|p2a: Sandslash|Rock Slide|p1a: Magnemite
+|-crit|p1a: Magnemite
+|-damage|p1a: Magnemite|58/100
+|move|p1a: Magnemite|Thunderbolt|p2a: Sandslash
+|-immune|p2a: Sandslash
+|
+|upkeep
+|turn|4
+|
+|switch|p2a: Moltres|Moltres, L73|282/282
+|move|p1a: Magnemite|Thunder|p2a: Moltres
+|-supereffective|p2a: Moltres
+|-damage|p2a: Moltres|25/282
+|
+|upkeep
+|turn|5
+|
+|switch|p2a: Kingler|Kingler, L76|240/240
+|switch|p1a: Ivysaur|Ivysaur, L82|100/100
+|
+|upkeep
+|turn|6
+|
+|switch|p2a: Nidoran-M|Nidoran-M, L90|266/266
+|switch|p1a: Rapidash|Rapidash, L75|100/100
+|
+|upkeep
+|turn|7
+|
+|move|p1a: Rapidash|Body Slam|p2a: Nidoran-M
+|-damage|p2a: Nidoran-M|192/266
+|move|p2a: Nidoran-M|Body Slam|p1a: Rapidash
+|-damage|p1a: Rapidash|75/100
+|
+|upkeep
+|turn|8
+|
+|switch|p1a: Butterfree|Butterfree, L77|100/100
+|move|p2a: Nidoran-M|Blizzard|p1a: Butterfree|[miss]
+|-miss|p2a: Nidoran-M
+|
+|upkeep
+|turn|9
+|
+|switch|p1a: Lickitung|Lickitung, L78|100/100
+|move|p2a: Nidoran-M|Double Kick|p1a: Lickitung
+|-supereffective|p1a: Lickitung
+|-damage|p1a: Lickitung|85/100
+|-damage|p1a: Lickitung|69/100
+|-hitcount|p1a: Lickitung|2
+|
+|upkeep
+|turn|10
+|
+|switch|p2a: Rattata|Rattata, L89|235/235
+|switch|p1a: Raticate|Raticate, L75|100/100
+|
+|upkeep
+|turn|11
+|
+|switch|p1a: Rapidash|Rapidash, L75|75/100
+|switch|p2a: Moltres|Moltres, L73|25/282
+|
+|upkeep
+|turn|12
+|
+|switch|p1a: Lickitung|Lickitung, L78|69/100
+|switch|p2a: Chansey|Chansey, L68|481/481
+|
+|upkeep
+|turn|13
+|
+|switch|p2a: Kingler|Kingler, L76|240/240
+|switch|p1a: Ivysaur|Ivysaur, L82|100/100
+|
+|upkeep
+|turn|14
+|
+|switch|p2a: Nidoran-M|Nidoran-M, L90|192/266
+|switch|p1a: Rapidash|Rapidash, L75|75/100
+|
+|upkeep
+|turn|15
+|
+|switch|p1a: Magnemite|Magnemite, L88|58/100
+|switch|p2a: Chansey|Chansey, L68|481/481
+|
+|upkeep
+|turn|16
+|
+|move|p1a: Magnemite|Thunder|p2a: Chansey|[miss]
+|-miss|p1a: Magnemite
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-fail|p2a: Chansey
+|
+|upkeep
+|turn|17
+|
+|switch|p2a: Sandslash|Sandslash, L76|270/270
+|move|p1a: Magnemite|Thunder Wave|p2a: Sandslash
+|-immune|p2a: Sandslash
+|
+|upkeep
+|turn|18
+|
+|switch|p2a: Chansey|Chansey, L68|481/481
+|switch|p1a: Lickitung|Lickitung, L78|69/100
+|
+|upkeep
+|turn|19
+|
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-fail|p2a: Chansey
+|move|p1a: Lickitung|Swords Dance|p1a: Lickitung
+|-boost|p1a: Lickitung|atk|2
+|
+|upkeep
+|turn|20
+|
+|switch|p1a: Raticate|Raticate, L75|100/100
+|move|p2a: Chansey|Seismic Toss|p1a: Raticate
+|-damage|p1a: Raticate|72/100
+|
+|upkeep
+|turn|21
+|
+|switch|p2a: Sandslash|Sandslash, L76|270/270
+|move|p1a: Raticate|Super Fang|p2a: Sandslash
+|-damage|p2a: Sandslash|135/270
+|
+|upkeep
+|turn|22
+|
+|switch|p1a: Rapidash|Rapidash, L75|75/100
+|switch|p2a: Nidoran-M|Nidoran-M, L90|192/266
+|
+|upkeep
+|turn|23
+|
+|switch|p2a: Moltres|Moltres, L73|25/282
+|move|p1a: Rapidash|Hyper Beam|p2a: Moltres
+|-damage|p2a: Moltres|0 fnt
+|faint|p2a: Moltres
+|
+|switch|p2a: Nidoran-M|Nidoran-M, L90|192/266
+|turn|24
+|
+|switch|p1a: Ivysaur|Ivysaur, L82|100/100
+|move|p2a: Nidoran-M|Blizzard|p1a: Ivysaur
+|-supereffective|p1a: Ivysaur
+|-damage|p1a: Ivysaur|50/100
+|
+|upkeep
+|turn|25
+|
+|switch|p2a: Kingler|Kingler, L76|240/240
+|move|p1a: Ivysaur|Sleep Powder|p2a: Kingler
+|-status|p2a: Kingler|slp|[from] move: Sleep Powder
+|
+|upkeep
+|turn|26
+|
+|switch|p2a: Rattata|Rattata, L89|235/235
+|switch|p1a: Raticate|Raticate, L75|72/100
+|
+|upkeep
+|turn|27
+|
+|move|p1a: Raticate|Super Fang|p2a: Rattata|[miss]
+|-miss|p1a: Raticate
+|move|p2a: Rattata|Double-Edge|p1a: Raticate
+|-damage|p1a: Raticate|25/100
+|-damage|p2a: Rattata|208/235|[from] Recoil|[of] p1a: Raticate
+|
+|upkeep
+|turn|28
+|
+|switch|p1a: Butterfree|Butterfree, L77|100/100
+|switch|p2a: Nidoran-M|Nidoran-M, L90|192/266
+|
+|upkeep
+|turn|29
+|
+|move|p1a: Butterfree|Psychic|p2a: Nidoran-M
+|-supereffective|p2a: Nidoran-M
+|-damage|p2a: Nidoran-M|68/266
+|move|p2a: Nidoran-M|Double Kick|p1a: Butterfree
+|-resisted|p1a: Butterfree
+|-damage|p1a: Butterfree|98/100
+|-damage|p1a: Butterfree|96/100
+|-hitcount|p1a: Butterfree|2
+|
+|upkeep
+|turn|30
+|
+|switch|p2a: Rattata|Rattata, L89|208/235
+|move|p1a: Butterfree|Double-Edge|p2a: Rattata
+|-damage|p2a: Rattata|153/235
+|-damage|p1a: Butterfree|91/100|[from] Recoil|[of] p2a: Rattata
+|
+|upkeep
+|turn|31
+|
+|switch|p2a: Nidoran-M|Nidoran-M, L90|68/266
+|move|p1a: Butterfree|Psychic|p2a: Nidoran-M
+|-supereffective|p2a: Nidoran-M
+|-damage|p2a: Nidoran-M|0 fnt
+|faint|p2a: Nidoran-M
+|
+|switch|p2a: Sandslash|Sandslash, L76|135/270
+|turn|32
+|
+|move|p1a: Butterfree|Psychic|p2a: Sandslash
+|-crit|p2a: Sandslash
+|-damage|p2a: Sandslash|0 fnt
+|faint|p2a: Sandslash
+|
+|switch|p2a: Kingler|Kingler, L76|240/240 slp
+|turn|33
+|
+|switch|p2a: Rattata|Rattata, L89|153/235
+|switch|p1a: Ivysaur|Ivysaur, L82|50/100
+|
+|upkeep
+|turn|34
+|
+|switch|p2a: Kingler|Kingler, L76|240/240 slp
+|switch|p1a: Rapidash|Rapidash, L75|75/100
+|
+|upkeep
+|turn|35
+|
+|switch|p1a: Raticate|Raticate, L75|25/100
+|switch|p2a: Chansey|Chansey, L68|481/481
+|
+|upkeep
+|turn|36
+|
+|switch|p1a: Ivysaur|Ivysaur, L82|50/100
+|move|p2a: Chansey|Ice Beam|p1a: Ivysaur
+|-supereffective|p1a: Ivysaur
+|-damage|p1a: Ivysaur|13/100
+|
+|upkeep
+|turn|37
+|
+|switch|p2a: Rattata|Rattata, L89|153/235
+|move|p1a: Ivysaur|Sleep Powder|p2a: Rattata
+|-message|Sleep Clause Mod activated.
+|-hint|Sleep Clause Mod prevents players from putting more than one of their opponent's Pokémon to sleep at a time
+|
+|upkeep
+|turn|38
+|
+|switch|p1a: Lickitung|Lickitung, L78|69/100
+|move|p2a: Rattata|Blizzard|p1a: Lickitung
+|-crit|p1a: Lickitung
+|-damage|p1a: Lickitung|27/100
+|
+|upkeep
+|turn|39
+|
+|move|p2a: Rattata|Blizzard|p1a: Lickitung|[miss]
+|-miss|p2a: Rattata
+|move|p1a: Lickitung|Hyper Beam|p2a: Rattata
+|-damage|p2a: Rattata|0 fnt
+|faint|p2a: Rattata
+|
+|switch|p2a: Kingler|Kingler, L76|240/240 slp
+|turn|40
+|
+|switch|p2a: Chansey|Chansey, L68|481/481
+|switch|p1a: Ivysaur|Ivysaur, L82|13/100
+|
+|upkeep
+|turn|41
+|
+|switch|p1a: Lickitung|Lickitung, L78|27/100
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-fail|p2a: Chansey
+|
+|upkeep
+|turn|42
+|
+|switch|p1a: Raticate|Raticate, L75|25/100
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-fail|p2a: Chansey
+|
+|upkeep
+|turn|43
+|
+|switch|p1a: Rapidash|Rapidash, L75|75/100
+|move|p2a: Chansey|Thunder Wave|p1a: Rapidash
+|-status|p1a: Rapidash|par
+|
+|upkeep
+|turn|44
+|
+|switch|p2a: Kingler|Kingler, L76|240/240 slp
+|move|p1a: Rapidash|Hyper Beam|p2a: Kingler
+|-damage|p2a: Kingler|156/240 slp
+|-mustrecharge|p1a: Rapidash
+|
+|upkeep
+|turn|45
+|
+|cant|p2a: Kingler|slp
+|cant|p1a: Rapidash|recharge
+|
+|upkeep
+|turn|46
+|
+|switch|p2a: Chansey|Chansey, L68|481/481
+|switch|p1a: Ivysaur|Ivysaur, L82|13/100
+|
+|upkeep
+|turn|47
+|
+|move|p1a: Ivysaur|Body Slam|p2a: Chansey
+|-damage|p2a: Chansey|360/481
+|move|p2a: Chansey|Thunder Wave|p1a: Ivysaur
+|-status|p1a: Ivysaur|par
+|
+|upkeep
+|turn|48
+|
+|move|p2a: Chansey|Seismic Toss|p1a: Ivysaur
+|-damage|p1a: Ivysaur|0 fnt
+|faint|p1a: Ivysaur
+|
+|switch|p1a: Lickitung|Lickitung, L78|27/100
+|turn|49
+|
+|switch|p1a: Rapidash|Rapidash, L75|75/100 par
+|move|p2a: Chansey|Ice Beam|p1a: Rapidash
+|-damage|p1a: Rapidash|52/100 par
+|
+|upkeep
+|turn|50
+|
+|switch|p2a: Kingler|Kingler, L76|156/240 slp
+|move|p1a: Rapidash|Body Slam|p2a: Kingler
+|-damage|p2a: Kingler|111/240 slp
+|
+|upkeep
+|turn|51
+|
+|switch|p2a: Chansey|Chansey, L68|360/481
+|move|p1a: Rapidash|Agility|p1a: Rapidash
+|-boost|p1a: Rapidash|spe|2
+|
+|upkeep
+|turn|52
+|
+|switch|p2a: Kingler|Kingler, L76|111/240 slp
+|move|p1a: Rapidash|Body Slam|p2a: Kingler
+|-damage|p2a: Kingler|63/240 slp
+|
+|upkeep
+|turn|53
+|
+|switch|p1a: Raticate|Raticate, L75|25/100
+|cant|p2a: Kingler|slp
+|
+|upkeep
+|turn|54
+|
+|move|p1a: Raticate|Body Slam|p2a: Kingler
+|-crit|p2a: Kingler
+|-damage|p2a: Kingler|0 fnt
+|faint|p2a: Kingler
+|
+|switch|p2a: Chansey|Chansey, L68|360/481
+|turn|55
+|
+|move|p1a: Raticate|Blizzard|p2a: Chansey
+|-damage|p2a: Chansey|308/481
+|move|p2a: Chansey|Thunder Wave|p1a: Raticate
+|-status|p1a: Raticate|par
+|
+|upkeep
+|turn|56
+|
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-heal|p2a: Chansey|481/481
+|cant|p1a: Raticate|par
+|
+|upkeep
+|turn|57
+|
+|move|p2a: Chansey|Seismic Toss|p1a: Raticate
+|-damage|p1a: Raticate|0 fnt
+|faint|p1a: Raticate
+|
+|switch|p1a: Lickitung|Lickitung, L78|27/100
+|turn|58
+|
+|switch|p1a: Rapidash|Rapidash, L75|52/100 par
+|move|p2a: Chansey|Seismic Toss|p1a: Rapidash|[miss]
+|-miss|p2a: Chansey
+|-hint|In Gen 1, moves with 100% accuracy can still miss 1/256 of the time.
+|
+|upkeep
+|turn|59
+|
+|move|p2a: Chansey|Seismic Toss|p1a: Rapidash
+|-damage|p1a: Rapidash|25/100 par
+|cant|p1a: Rapidash|par
+|
+|upkeep
+|turn|60
+|
+|switch|p1a: Lickitung|Lickitung, L78|27/100
+|move|p2a: Chansey|Ice Beam|p1a: Lickitung
+|-damage|p1a: Lickitung|6/100
+|
+|upkeep
+|turn|61
+|
+|move|p2a: Chansey|Ice Beam|p1a: Lickitung
+|-damage|p1a: Lickitung|0 fnt
+|faint|p1a: Lickitung
+|
+|switch|p1a: Magnemite|Magnemite, L88|58/100
+|turn|62
+|
+|move|p1a: Magnemite|Double-Edge|p2a: Chansey
+|-damage|p2a: Chansey|354/481
+|-damage|p1a: Magnemite|44/100|[from] Recoil|[of] p2a: Chansey
+|move|p2a: Chansey|Seismic Toss|p1a: Magnemite
+|-damage|p1a: Magnemite|14/100
+|
+|upkeep
+|turn|63
+|
+|move|p1a: Magnemite|Thunderbolt|p2a: Chansey
+|-damage|p2a: Chansey|243/481
+|move|p2a: Chansey|Thunder Wave|p1a: Magnemite
+|-status|p1a: Magnemite|par
+|
+|upkeep
+|turn|64
+|
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-heal|p2a: Chansey|481/481
+|move|p1a: Magnemite|Double-Edge|p2a: Chansey
+|-damage|p2a: Chansey|337/481
+|-damage|p1a: Magnemite|0 fnt|[from] Recoil|[of] p2a: Chansey
+|faint|p1a: Magnemite
+|
+|switch|p1a: Rapidash|Rapidash, L75|25/100 par
+|turn|65
+|
+|move|p2a: Chansey|Seismic Toss|p1a: Rapidash
+|-damage|p1a: Rapidash|0 fnt
+|faint|p1a: Rapidash
+|
+|switch|p1a: Butterfree|Butterfree, L77|91/100
+|turn|66
+|
+|move|p1a: Butterfree|Sleep Powder|p2a: Chansey|[miss]
+|-miss|p1a: Butterfree
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-heal|p2a: Chansey|481/481
+|
+|upkeep
+|turn|67
+|
+|move|p1a: Butterfree|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|427/481
+|move|p2a: Chansey|Ice Beam|p1a: Butterfree
+|-supereffective|p1a: Butterfree
+|-damage|p1a: Butterfree|47/100
+|
+|upkeep
+|turn|68
+|
+|move|p1a: Butterfree|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|374/481
+|-unboost|p2a: Chansey|spa|1
+|-unboost|p2a: Chansey|spd|1
+|move|p2a: Chansey|Ice Beam|p1a: Butterfree
+|-supereffective|p1a: Butterfree
+|-damage|p1a: Butterfree|17/100
+|
+|upkeep
+|turn|69
+|
+|move|p1a: Butterfree|Sleep Powder|p2a: Chansey
+|-status|p2a: Chansey|slp|[from] move: Sleep Powder
+|-curestatus|p2a: Chansey|slp|[msg]
+|
+|upkeep
+|turn|70
+|
+|move|p1a: Butterfree|Stun Spore|p2a: Chansey|[miss]
+|-miss|p1a: Butterfree
+|move|p2a: Chansey|Seismic Toss|p1a: Butterfree
+|-damage|p1a: Butterfree|0 fnt
+|faint|p1a: Butterfree
+|
+|win|RandOpp0phdepc
+    </script>
+</div>
+
+<div class="battle-log battle-log-inline" style="display:none"></div>
+
+<script>
+    let daily = Math.floor(Date.now() / 1000 / 60 / 60 / 24); document.write('<script src="https://play.pokemonshowdown.com/js/replay-embed.js?version' + daily + '"></' + 'script>');
+</script>
+
+<p style="text-align:center"> Replay created by <a href="https://github.com/hsahovic/poke-env">poke-env</a>, with code from <a
+        href="https://github.com/smogon/pokemon-showdown"> pokemon-showdown</a>. If something goes wrong, don't hesitate
+    to open an <a href="https://github.com/hsahovic/poke-env/issues">issue!</a></p>

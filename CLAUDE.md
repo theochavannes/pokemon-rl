@@ -82,21 +82,26 @@ npx mocha -g "text"   # single test by name
 showdown/          # Pokemon Showdown server (separate git repo, gitignored)
 src/
   env/             # Gymnasium environment wrapper (gen1_env.py)
-  agents/          # Heuristic baseline agents
-  train.py         # PPO training loop
+  agents/          # Heuristic baseline agents + epsilon wrappers
+  train.py         # 4-phase curriculum training loop
   selfplay_train.py
-  callbacks.py     # WinRateCallback
+  callbacks.py     # WinRateCallback (logging, milestones, epsilon/temp annealing)
+  obs_transfer.py  # Obs-space transfer learning for model compatibility
+  run_manager.py   # Run isolation (runs/run_NNN/)
 scripts/
   verify_setup.py
   benchmark_heuristic.py
-models/            # Checkpoints (gitignored)
-logs/              # TensorBoard logs (gitignored)
+  battle_sim.py    # Simulate any two agents head-to-head
+  tournament.py
+tests/
+  test_core.py     # Unit tests (23 tests, run with pytest)
+runs/              # Training runs (gitignored except logs)
 PLAN.md            # 6-phase implementation roadmap
 ```
 
-The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 153-dim float32 observation space, shaped rewards (hp/fainted/status/victory), and action masking.
+The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 421-dim float32 observation space, shaped rewards (fainted=0.5, hp=0.5, status=0.1, victory=3.0), and action masking. All Pokemon are forced to level 100 in Showdown for training consistency.
 
-Env stack: `Gen1Env → SingleAgentWrapper → SB3Wrapper → DummyVecEnv → MaskablePPO`
+Env stack: `Gen1Env → SingleAgentWrapper → SB3Wrapper → Monitor → DummyVecEnv → MaskablePPO`
 
 ## Gen 1 Mechanics to Be Aware Of
 

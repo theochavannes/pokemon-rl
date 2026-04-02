@@ -9,7 +9,7 @@ Curated moments and narrative beats for the YouTube video, maintained by [MEDIA]
 ### The Stack
 - Pokemon Showdown (local server) + poke-env + MaskablePPO
 - Gen 1 random battles — no team building, pure battle skill
-- 153-dimensional observation space: HP, types, moves, boosts, status, levels, opponent info
+- 421-dimensional observation space: HP, types, moves, boosts, status, base stats, opponent info (all level 100)
 
 ### MaxDamage Baseline: 99% vs Random
 Our heuristic bot (always picks highest-damage move) crushes RandomPlayer 99/100. This is the bar the RL agent must beat.
@@ -86,6 +86,13 @@ Shaping starts at full strength (learn basics from intermediate rewards) and lin
 | B | RandomAttacker (85% attack) | Fixed, medium |
 | C | SoftmaxDamage (temp 2.0 -> 0.1) | Smooth ramp to MaxDamage |
 | D | Mixed + frozen self-play | All opponents, endgame |
+
+### The Hidden Bug — Temperature Annealing Was Dead
+**Hook:** "We built an entire softmax opponent system and it turns out the temperature never changed."
+
+The callback that anneals the softmax temperature checked `hasattr(opp, "epsilon")` as a guard. SoftmaxDamagePlayer uses `temperature`, not `epsilon`. The entire Phase C annealing was silently broken — the opponent stayed at the initial soft temperature forever. Phase C could only exit by hitting max_steps (400k), never by actually graduating at full difficulty.
+
+**Visual:** Show the code diff. One line changed, entire training pipeline unlocked.
 
 ### What to Capture
 - Save run_013 Phase B plateau (20-45%) as "before softmax"

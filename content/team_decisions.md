@@ -18,9 +18,11 @@ Updated after every significant team discussion.
 | v1 | 64 | Basic: HP, boosts, status, types, moves |
 | v2 | 127 | Added bench types, opponent bench, accuracy, trapping |
 | v3 | 139 | Added acc/eva boosts, base stats, opponent revealed moves |
-| v4 (current) | 153 | Added Pokemon level (gen1randombattle has varying levels 58-100) |
+| v4 | 153 | Added Pokemon level (gen1randombattle has varying levels 58-100) |
+| v5 | 435 | Full bench obs — all 4 moves per bench mon w/ effectiveness |
+| v6 (current) | 421 | Removed level (forced to 100 in Showdown config, always 1.0) |
 
-Transfer learning via `obs_transfer.py` handles loading old checkpoints into new obs spaces — zero-pads new input columns.
+Transfer learning via `obs_transfer.py` handles loading old checkpoints into new obs spaces — zero-pads new input columns. v5→v6 is a breaking change (feature positions shifted).
 
 ---
 
@@ -106,3 +108,21 @@ Expert panel diagnosis: reward signal too weak by an order of magnitude. Agent c
 1. **Disable desync:** poke-env occasionally sends moves that were Disabled mid-turn. Showdown rejects and picks default action. Non-fatal.
 2. **Switch-to-active:** Action mask doesn't always filter "switch to already active Pokemon." Showdown rejects. Non-fatal.
 3. **Forced switch desync:** `order_to_action` raises ValueError when opponent's forced switch doesn't match valid orders. Caught in SB3Wrapper, returns neutral reward (0.0).
+
+---
+
+## 2026-04-02 — Codebase Improvement Pass (10-Agent Audit)
+
+### Bugs Found and Fixed
+1. **`shaping_decay_battles` never passed to WinRateCallback** — used hardcoded default 5000 instead of explicit parameter. Fixed.
+2. **`selfplay_train.py` missing `env` param in WinRateCallback** — shaping decay was silently disabled during self-play. Fixed.
+3. **`reset_num_timesteps` logic always False** — `model is None` check happened after model was already assigned. Fixed with `is_fresh_run` flag.
+4. **Temperature annealing completely broken for SoftmaxDamagePlayer** — callback checked `hasattr(opp, "epsilon")` which returned False for SoftmaxDamagePlayer (has `temperature`, not `epsilon`). Phase C could never graduate via annealing — only by hitting max_steps. Fixed.
+5. **`opponent_epsilon` parameter name confusing** — renamed to `opponent_difficulty` since it means temperature for softmax and epsilon for epsilon-greedy opponents.
+6. **Temperature not saved on phase completion** — resume only saved epsilon, not temperature. `SoftmaxDamagePlayer` temperature is now persisted so Phase C resumes at the correct difficulty.
+
+### Obs Space Change: 435 → 421
+Removed `level` feature (14 dims total: 1 per Pokemon slot). All Pokemon forced to level 100 in Showdown — the feature was always 1.0, wasting dimensions. This is a breaking change for existing checkpoints (feature positions shift throughout the observation vector).
+
+### Testing
+Added 23 unit tests covering: `embed_battle` shape/dtype/values, `_expected_damage`, `SoftmaxDamagePlayer` temperature behavior, `_EpsilonMixin` blend, `obs_transfer` weight expansion, reward shaping decay, and integration smoke tests.

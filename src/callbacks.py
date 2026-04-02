@@ -101,6 +101,8 @@ class WinRateCallback(BaseCallback):
         self._episode_lengths: deque = deque(maxlen=window)
         self._epsilon_rewards: deque = deque(maxlen=500)  # long window for stable epsilon calc
         self._action_counts = np.zeros(10, dtype=np.int64)
+        self._forced_switch_count: int = 0
+        self._voluntary_switch_count: int = 0
         self._best_win_rate: float = 0.0
         self._last_log_step: int = 0
         self._snapped_milestones: set = set()
@@ -111,6 +113,23 @@ class WinRateCallback(BaseCallback):
         self._last_heartbeat_step: int = 0
         self._heartbeat_freq: int = 2048  # print a heartbeat every rollout
 
+    def _get_action_masks(self):
+        """Get current action masks from vectorized env (one per sub-env)."""
+        if hasattr(self.training_env, "envs"):
+            masks = []
+            for env in self.training_env.envs:
+                if hasattr(env, "action_masks"):
+                    masks.append(env.action_masks())
+                else:
+                    inner = env
+                    while hasattr(inner, "env"):
+                        inner = inner.env
+                        if hasattr(inner, "action_masks"):
+                            masks.append(inner.action_masks())
+                            break
+            return masks if masks else None
+        return None
+
     def _on_training_start(self) -> None:
         self.content_log.parent.mkdir(parents=True, exist_ok=True)
         self._write_content_log_header()
@@ -120,12 +139,23 @@ class WinRateCallback(BaseCallback):
             print(f"  (first battles will print individually)\n")
 
     def _on_step(self) -> bool:
-        # Track action distribution
+        # Track action distribution + forced vs voluntary switches
         actions = self.locals.get("actions")
         if actions is not None:
-            for a in np.array(actions).flatten():
+            action_masks = self._get_action_masks()
+            for idx, a in enumerate(np.array(actions).flatten()):
                 if 0 <= a < 10:
                     self._action_counts[a] += 1
+                    if a < 6:  # switch action
+                        # Forced switch = no move actions available in the mask
+                        if action_masks is not None and idx < len(action_masks):
+                            moves_available = action_masks[idx][6:].any()
+                            if moves_available:
+                                self._voluntary_switch_count += 1
+                            else:
+                                self._forced_switch_count += 1
+                        else:
+                            self._voluntary_switch_count += 1  # assume voluntary if no mask info
 
         # Track episode outcomes
         for info in self.locals.get("infos", []):
@@ -208,12 +238,18 @@ class WinRateCallback(BaseCallback):
         total_actions = self._action_counts.sum()
         action_pct = (self._action_counts / total_actions * 100) if total_actions > 0 else self._action_counts
 
+        # Compute voluntary vs forced switch rates
+        total_switches = self._voluntary_switch_count + self._forced_switch_count
+        vol_switch_pct = (self._voluntary_switch_count / total_actions * 100) if total_actions > 0 else 0.0
+        forced_switch_pct = (self._forced_switch_count / total_actions * 100) if total_actions > 0 else 0.0
+
         # TensorBoard only — exclude stdout/log/json/csv on each record() call
         _tb_only = ("stdout", "log", "json", "csv")
         self.logger.record("train/win_rate", win_rate, exclude=_tb_only)
         self.logger.record("train/avg_episode_length", avg_length, exclude=_tb_only)
         self.logger.record("train/episodes_in_window", n, exclude=_tb_only)
-        self.logger.record("train/switch_rate_pct", float(action_pct[:6].sum()), exclude=_tb_only)
+        self.logger.record("train/voluntary_switch_pct", vol_switch_pct, exclude=_tb_only)
+        self.logger.record("train/forced_switch_pct", forced_switch_pct, exclude=_tb_only)
         self.logger.record("train/move_rate_pct", float(action_pct[6:].sum()), exclude=_tb_only)
         self.logger.dump(self.num_timesteps)
 
@@ -227,13 +263,17 @@ class WinRateCallback(BaseCallback):
             bar = "█" * int(win_rate * 20) + "░" * (20 - int(win_rate * 20))
             label = self.phase_label or "opponent"
             eps_str = ""
-            if self.opponents and hasattr(self.opponents[0], "epsilon"):
-                eps_str = f"  opp_ε={self.opponents[0].epsilon:.2f}"
+            if self.opponents:
+                opp = self.opponents[0]
+                if hasattr(opp, "temperature"):
+                    eps_str = f"  temp={opp.temperature:.2f}"
+                elif hasattr(opp, "epsilon"):
+                    eps_str = f"  opp_ε={opp.epsilon:.2f}"
             print(
                 f"  step {self.num_timesteps:>6,} │ "
                 f"vs {label}: {win_rate*100:>5.1f}%  [{bar}]  "
                 f"avg {avg_length:.0f} turns  "
-                f"switch {action_pct[:6].sum():.0f}%  "
+                f"vol.switch {vol_switch_pct:.0f}%  forced {forced_switch_pct:.0f}%  "
                 f"({n} eps){eps_str}"
             )
 
@@ -272,14 +312,12 @@ class WinRateCallback(BaseCallback):
         self._write_checkpoint_metadata(win_rate, avg_length)
 
         # Content logging
-        self._update_content_log(win_rate, avg_length, action_pct, n)
+        self._update_content_log(win_rate, avg_length, action_pct, n, vol_switch_pct, forced_switch_pct)
         self._check_win_rate_milestones(win_rate, avg_length, action_pct)
         self._maybe_snapshot_replays(win_rate)
 
-    def _update_content_log(self, win_rate, avg_length, action_pct, n) -> None:
+    def _update_content_log(self, win_rate, avg_length, action_pct, n, vol_switch_pct, forced_switch_pct) -> None:
         """Append a row to content/training_log.md."""
-        switch_pct = action_pct[:6].sum()
-        move_pct = action_pct[6:].sum()
         top_move = int(np.argmax(self._action_counts[6:])) + 1  # 1-indexed
         top_move_pct = action_pct[6 + np.argmax(self._action_counts[6:])]
 
@@ -287,7 +325,8 @@ class WinRateCallback(BaseCallback):
             f"| {self.num_timesteps:>7} "
             f"| {win_rate:.3f} "
             f"| {avg_length:>5.1f} "
-            f"| {switch_pct:>5.1f}% "
+            f"| {vol_switch_pct:>5.1f}% "
+            f"| {forced_switch_pct:>5.1f}% "
             f"| move_{top_move} ({top_move_pct:.1f}%) "
             f"| {n} |\n"
         )
@@ -396,7 +435,7 @@ class WinRateCallback(BaseCallback):
         if not self.epsilon_schedule or not self.opponents:
             return
         eps_start, eps_end = self.epsilon_schedule
-        if not hasattr(self.opponents[0], "epsilon"):
+        if not hasattr(self.opponents[0], "epsilon") and not hasattr(self.opponents[0], "temperature"):
             return
         if len(self._epsilon_rewards) < 500:
             return
@@ -444,8 +483,8 @@ class WinRateCallback(BaseCallback):
             f"\n## Phase vs {label}\n\n"
             f"Started: {date}  \n"
             f"Target: {target*100:.0f}% win rate\n\n"
-            f"| Step    | Win Rate | Avg Turns | Switch% | Top Move         | Episodes |\n"
-            f"|---------|----------|-----------|---------|------------------|----------|\n"
+            f"| Step    | Win Rate | Avg Turns | Vol.Switch% | Forced% | Top Move         | Episodes |\n"
+            f"|---------|----------|-----------|-------------|---------|------------------|----------|\n"
         )
         mode = "a" if self.content_log.exists() else "w"
         with open(self.content_log, mode, encoding="utf-8") as f:

@@ -43,11 +43,11 @@ BATTLE_FORMAT = "gen1randombattle"
 N_ENVS = 4
 
 PPO_KWARGS = dict(
-    policy="MlpPolicy",
+    policy="MlpPolicy",           # [64, 64] MLP — tested [128,128] and [256,256], both worse
     n_steps=2048,
     batch_size=64,
     n_epochs=10,
-    gamma=0.99,
+    gamma=0.99,                    # Effective horizon ~100 turns (avg game ~50 turns)
     gae_lambda=0.95,
     clip_range=0.2,
     learning_rate=3e-4,
@@ -59,7 +59,7 @@ CURRICULUM = [
         name="A",
         opponent_type="random",
         phase_label="Random",
-        target_wr=0.85,
+        target_wr=0.95,
         max_steps=200_000,
         shaping_factor=1.0,
     ),
@@ -67,7 +67,7 @@ CURRICULUM = [
         name="B",
         opponent_type="random_attacker",
         phase_label="RandAttacker",
-        target_wr=0.80,
+        target_wr=0.95,
         max_steps=200_000,
         shaping_factor=1.0,
     ),
@@ -121,6 +121,7 @@ def main(new_run: bool = False) -> None:
     resume_path = run.latest_checkpoint()
     progress = run.load_progress()
     model = None
+    is_fresh_run = resume_path is None  # True only for brand-new runs with no checkpoints
 
     for phase in CURRICULUM:
         # Skip phases that were already completed in a previous session
@@ -173,7 +174,7 @@ def main(new_run: bool = False) -> None:
                 save_replays=replay_dir,
                 opponent_type=phase["opponent_type"],
                 shaping_factor=shaping,
-                opponent_epsilon=epsilon_start or 0.8,
+                opponent_difficulty=epsilon_start or 0.8,
                 selfplay_model_path=selfplay_path,
             )
             for i in range(N_ENVS)
@@ -203,11 +204,11 @@ def main(new_run: bool = False) -> None:
             else:
                 model = MaskablePPO(env=env, **{**PPO_KWARGS, "tensorboard_log": run.logs_dir})
                 # Bias policy toward moves (actions 6-9) over switches (actions 0-5).
-                # Moves get +1.0 logit → ~73% move probability at init vs 27% switch.
-                # Corrects the 6:4 switch:move structural imbalance in the action space.
                 # The bias is a learned parameter — PPO will adjust it naturally.
                 with torch.no_grad():
-                    model.policy.action_net.bias.data[6:] += 1.0
+                    model.policy.action_net.bias.data[:6] -= 2.0   # penalize switches
+                    model.policy.action_net.bias.data[6:] += 2.0   # boost moves
+                    print(f"  Logit bias: switches={model.policy.action_net.bias.data[:6].mean():.1f}, moves={model.policy.action_net.bias.data[6:].mean():.1f}")
         else:
             model.set_env(env)
 
@@ -249,6 +250,7 @@ def main(new_run: bool = False) -> None:
             run_manager=run,
             phase_name=phase["name"],
             selfplay_path=selfplay_path,
+            shaping_decay_battles=5000,
             global_episodes_offset=global_episodes,
             env=env,
         )
@@ -262,16 +264,21 @@ def main(new_run: bool = False) -> None:
         model.learn(
             total_timesteps=remaining_steps,
             callback=[win_rate_cb, checkpoint_cb],
-            reset_num_timesteps=(model is None and resume_path is None),
+            reset_num_timesteps=is_fresh_run,
         )
+        is_fresh_run = False  # Only reset on the very first phase of a new run
 
         # Carry cumulative episode count to next phase for shaping decay
         global_episodes += win_rate_cb._total_episodes
 
         # Save phase completion + progress for resume
         current_epsilon = None
-        if opponents and hasattr(opponents[0], "epsilon"):
-            current_epsilon = opponents[0].epsilon
+        if opponents:
+            opp = opponents[0]
+            if hasattr(opp, "temperature"):
+                current_epsilon = opp.temperature
+            elif hasattr(opp, "epsilon"):
+                current_epsilon = opp.epsilon
         run.save_progress(phase["name"], phase["max_steps"], current_epsilon)
 
         phase_path = str(Path(run.models_dir) / f"phase_{phase['name']}_final")

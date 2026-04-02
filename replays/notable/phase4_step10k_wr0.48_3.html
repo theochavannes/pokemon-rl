@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<!-- version 1 -->
+<title>battle-gen1randombattle-2755</title>
+<style>
+    html,
+    body {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+        margin: 0;
+        padding: 0;
+    }
+
+    body {
+        padding: 12px 0;
+    }
+
+    .battle-log {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+    }
+
+    .battle-log-inline {
+        border: 1px solid #AAAAAA;
+        background: #EEF2F5;
+        color: black;
+        max-width: 640px;
+        margin: 0 auto 80px;
+        padding-bottom: 5px;
+    }
+
+    .battle-log .inner {
+        padding: 4px 8px 0px 8px;
+    }
+
+    .battle-log .inner-preempt {
+        padding: 0 8px 4px 8px;
+    }
+
+    .battle-log .inner-after {
+        margin-top: 0.5em;
+    }
+
+    .battle-log h2 {
+        margin: 0.5em -8px;
+        padding: 4px 8px;
+        border: 1px solid #AAAAAA;
+        background: #E0E7EA;
+        border-left: 0;
+        border-right: 0;
+        font-family: Verdana, sans-serif;
+        font-size: 13pt;
+    }
+
+    .backprop {
+        top: 0;
+    }
+
+    .battle-log .chat {
+        vertical-align: middle;
+        padding: 3px 0 3px 0;
+        font-size: 8pt;
+    }
+
+    .battle-log .chat strong {
+        color: #40576A;
+    }
+
+    .battle-log .chat em {
+        padding: 1px 4px 1px 3px;
+        color: #000000;
+        font-style: normal;
+    }
+
+    .chat.mine {
+        background: rgba(0, 0, 0, 0.05);
+        margin-left: -8px;
+        margin-right: -8px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .spoiler {
+        color: #BBBBBB;
+        background: #BBBBBB;
+        padding: 0px 3px;
+    }
+
+    .spoiler:hover,
+    .spoiler:active,
+    .spoiler-shown {
+        color: #000000;
+        background: #E2E2E2;
+        padding: 0px 3px;
+    }
+
+    .spoiler a {
+        color: #BBBBBB;
+    }
+
+    .spoiler:hover a,
+    .spoiler:active a,
+    .spoiler-shown a {
+        color: #2288CC;
+    }
+
+    .chat code,
+    .chat .spoiler:hover code,
+    .chat .spoiler:active code,
+    .chat .spoiler-shown code {
+        border: 1px solid #C0C0C0;
+        background: #EEEEEE;
+        color: black;
+        padding: 0 2px;
+    }
+
+    .chat .spoiler code {
+        border: 1px solid #CCCCCC;
+        background: #CCCCCC;
+        color: #CCCCCC;
+    }
+
+    .battle-log .rated {
+        padding: 3px 4px;
+    }
+
+    .battle-log .rated strong {
+        color: white;
+        background: #89A;
+        padding: 1px 4px;
+        border-radius: 4px;
+    }
+
+    .spacer {
+        margin-top: 0.5em;
+    }
+
+    .message-announce {
+        background: #6688AA;
+        color: white;
+        padding: 1px 4px 2px;
+    }
+
+    .message-announce a,
+    .broadcast-green a,
+    .broadcast-blue a,
+    .broadcast-red a {
+        color: #DDEEFF;
+    }
+
+    .broadcast-green {
+        background-color: #559955;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .broadcast-blue {
+        background-color: #6688AA;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .infobox {
+        border: 1px solid #6688AA;
+        padding: 2px 4px;
+    }
+
+    .infobox-limited {
+        max-height: 200px;
+        overflow: auto;
+        overflow-x: hidden;
+    }
+
+    .broadcast-red {
+        background-color: #AA5544;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .message-learn-canlearn {
+        font-weight: bold;
+        color: #228822;
+        text-decoration: underline;
+    }
+
+    .message-learn-cannotlearn {
+        font-weight: bold;
+        color: #CC2222;
+        text-decoration: underline;
+    }
+
+    .message-effect-weak {
+        font-weight: bold;
+        color: #CC2222;
+    }
+
+    .message-effect-resist {
+        font-weight: bold;
+        color: #6688AA;
+    }
+
+    .message-effect-immune {
+        font-weight: bold;
+        color: #666666;
+    }
+
+    .message-learn-list {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    .message-throttle-notice,
+    .message-error {
+        color: #992222;
+    }
+
+    .message-overflow,
+    .chat small.message-overflow {
+        font-size: 0pt;
+    }
+
+    .message-overflow::before {
+        font-size: 9pt;
+        content: '...';
+    }
+
+    .subtle {
+        color: #3A4A66;
+    }
+</style>
+<div class="wrapper replay-wrapper" style="max-width:1180px;margin:0 auto">
+    <input type="hidden" name="replayid" value="unregisteredserver-gen8randombattle-320064" />
+    <div class="battle"></div>
+    <div class="battle-log"></div>
+    <div class="replay-controls"></div>
+    <div class="replay-controls-2"></div>
+    <h1 style="font-weight:normal;text-align:center"><strong>poke-env battle replay</strong><br />battle-gen1randombattle-2755<br /><a
+            href="http://pokemonshowdown.com/users/randomplayer1" class="subtle" target="_blank">RandOpp0phdepc</a>
+        vs. <a href="http://pokemonshowdown.com/users/randomplayer2" class="subtle"
+            target="_blank">PPOAgent0phdepc</a></h1>
+    <script type="text/plain" class="battle-log-data">
+    >battle-gen1randombattle-2755
+|init|battle
+|title|PPOAgent0phdepc vs. RandOpp0phdepc
+|j|☆PPOAgent0phdepc
+|j|☆RandOpp0phdepc
+|gametype|singles
+|player|p1|PPOAgent0phdepc|170|
+|player|p2|RandOpp0phdepc|169|
+|gen|1
+|tier|[Gen 1] Random Battle
+|rule|Desync Clause Mod: Desyncs changed to move failure.
+|rule|HP Percentage Mod: HP is shown in percentages
+|rule|Endless Battle Clause: Forcing endless battles is banned
+|rule|Sleep Clause Mod: Limit one foe put to sleep
+|rule|Freeze Clause Mod: Limit one foe frozen
+|rule|Species Clause: Limit one of each Pokémon
+|rule|OHKO Clause: OHKO moves are banned
+|rule|Evasion Moves Clause: Evasion moves are banned
+|
+|teamsize|p1|6
+|teamsize|p2|6
+|start
+|switch|p1a: Ditto|Ditto|100/100
+|switch|p2a: Hitmonchan|Hitmonchan, L80|244/244
+|turn|1
+|
+|switch|p2a: Snorlax|Snorlax, L69|363/363
+|switch|p1a: Hypno|Hypno, L72|100/100
+|
+|upkeep
+|turn|2
+|
+|switch|p1a: Ditto|Ditto|100/100
+|move|p2a: Snorlax|Body Slam|p1a: Ditto
+|-damage|p1a: Ditto|72/100
+|
+|upkeep
+|turn|3
+|
+|switch|p1a: Persian|Persian, L73|100/100
+|move|p2a: Snorlax|Body Slam|p1a: Persian
+|-damage|p1a: Persian|65/100
+|
+|upkeep
+|turn|4
+|
+|switch|p1a: Tentacruel|Tentacruel, L73|100/100
+|move|p2a: Snorlax|Body Slam|p1a: Tentacruel
+|-damage|p1a: Tentacruel|69/100
+|
+|upkeep
+|turn|5
+|
+|move|p1a: Tentacruel|Hyper Beam|p2a: Snorlax
+|-damage|p2a: Snorlax|272/363
+|-mustrecharge|p1a: Tentacruel
+|move|p2a: Snorlax|Body Slam|p1a: Tentacruel
+|-damage|p1a: Tentacruel|34/100
+|
+|upkeep
+|turn|6
+|
+|cant|p1a: Tentacruel|recharge
+|move|p2a: Snorlax|Amnesia|p2a: Snorlax
+|-boost|p2a: Snorlax|spa|2
+|-boost|p2a: Snorlax|spd|2
+|
+|upkeep
+|turn|7
+|
+|switch|p2a: Jolteon|Jolteon, L69|232/232
+|move|p1a: Tentacruel|Swords Dance|p1a: Tentacruel
+|-boost|p1a: Tentacruel|atk|2
+|
+|upkeep
+|turn|8
+|
+|switch|p2a: Hitmonchan|Hitmonchan, L80|244/244
+|move|p1a: Tentacruel|Blizzard|p2a: Hitmonchan
+|-crit|p2a: Hitmonchan
+|-damage|p2a: Hitmonchan|0 fnt
+|faint|p2a: Hitmonchan
+|
+|switch|p2a: Jolteon|Jolteon, L69|232/232
+|turn|9
+|
+|move|p2a: Jolteon|Thunderbolt|p1a: Tentacruel|[miss]
+|-miss|p2a: Jolteon
+|-hint|In Gen 1, moves with 100% accuracy can still miss 1/256 of the time.
+|move|p1a: Tentacruel|Surf|p2a: Jolteon
+|-damage|p2a: Jolteon|139/232
+|
+|upkeep
+|turn|10
+|
+|switch|p1a: Hypno|Hypno, L72|100/100
+|move|p2a: Jolteon|Thunderbolt|p1a: Hypno
+|-crit|p1a: Hypno
+|-damage|p1a: Hypno|50/100
+|
+|upkeep
+|turn|11
+|
+|switch|p2a: Shellder|Shellder, L90|237/237
+|switch|p1a: Ditto|Ditto|72/100
+|
+|upkeep
+|turn|12
+|
+|switch|p1a: Persian|Persian, L73|65/100
+|switch|p2a: Jolteon|Jolteon, L69|139/232
+|
+|upkeep
+|turn|13
+|
+|move|p2a: Jolteon|Agility|p2a: Jolteon
+|-boost|p2a: Jolteon|spe|2
+|move|p1a: Persian|Slash|p2a: Jolteon
+|-crit|p2a: Jolteon
+|-damage|p2a: Jolteon|1/232
+|
+|upkeep
+|turn|14
+|
+|switch|p2a: Shellder|Shellder, L90|237/237
+|switch|p1a: Venusaur|Venusaur, L73|100/100
+|
+|upkeep
+|turn|15
+|
+|move|p1a: Venusaur|Swords Dance|p1a: Venusaur
+|-boost|p1a: Venusaur|atk|2
+|move|p2a: Shellder|Surf|p1a: Venusaur
+|-resisted|p1a: Venusaur
+|-damage|p1a: Venusaur|86/100
+|
+|upkeep
+|turn|16
+|
+|move|p1a: Venusaur|Sleep Powder|p2a: Shellder
+|-status|p2a: Shellder|slp|[from] move: Sleep Powder
+|cant|p2a: Shellder|slp
+|
+|upkeep
+|turn|17
+|
+|switch|p1a: Hypno|Hypno, L72|50/100
+|switch|p2a: Charizard|Charizard, L74|268/268
+|
+|upkeep
+|turn|18
+|
+|switch|p2a: Shellder|Shellder, L90|237/237 slp
+|move|p1a: Hypno|Counter|p2a: Shellder
+|-fail|p1a: Hypno
+|
+|upkeep
+|turn|19
+|
+|switch|p2a: Snorlax|Snorlax, L69|272/363
+|move|p1a: Hypno|Hypnosis|p2a: Snorlax|[miss]
+|-miss|p1a: Hypno
+|
+|upkeep
+|turn|20
+|
+|switch|p1a: Persian|Persian, L73|65/100
+|switch|p2a: Jolteon|Jolteon, L69|1/232
+|
+|upkeep
+|turn|21
+|
+|switch|p1a: Hypno|Hypno, L72|50/100
+|move|p2a: Jolteon|Body Slam|p1a: Hypno
+|-damage|p1a: Hypno|34/100
+|
+|upkeep
+|turn|22
+|
+|switch|p1a: Venusaur|Venusaur, L73|86/100
+|move|p2a: Jolteon|Body Slam|p1a: Venusaur
+|-damage|p1a: Venusaur|72/100
+|
+|upkeep
+|turn|23
+|
+|move|p2a: Jolteon|Thunder Wave|p1a: Venusaur
+|-status|p1a: Venusaur|par
+|move|p1a: Venusaur|Sleep Powder|p2a: Jolteon|[miss]
+|-miss|p1a: Venusaur
+|
+|upkeep
+|turn|24
+|
+|switch|p2a: Shellder|Shellder, L90|237/237 slp
+|cant|p1a: Venusaur|par
+|
+|upkeep
+|turn|25
+|
+|switch|p1a: Hypno|Hypno, L72|34/100
+|cant|p2a: Shellder|slp
+|
+|upkeep
+|turn|26
+|
+|switch|p1a: Ditto|Ditto|72/100
+|switch|p2a: Charizard|Charizard, L74|268/268
+|
+|upkeep
+|turn|27
+|
+|switch|p1a: Persian|Persian, L73|65/100
+|move|p2a: Charizard|Fire Blast|p1a: Persian
+|-damage|p1a: Persian|12/100
+|
+|upkeep
+|turn|28
+|
+|move|p1a: Persian|Slash|p2a: Charizard
+|-crit|p2a: Charizard
+|-damage|p2a: Charizard|161/268
+|move|p2a: Charizard|Hyper Beam|p1a: Persian
+|-damage|p1a: Persian|0 fnt
+|faint|p1a: Persian
+|
+|switch|p1a: Tentacruel|Tentacruel, L73|34/100
+|turn|29
+|
+|move|p2a: Charizard|Hyper Beam|p1a: Tentacruel
+|-damage|p1a: Tentacruel|0 fnt
+|faint|p1a: Tentacruel
+|
+|switch|p1a: Rhyhorn|Rhyhorn, L84|100/100
+|turn|30
+|
+|move|p2a: Charizard|Earthquake|p1a: Rhyhorn
+|-supereffective|p1a: Rhyhorn
+|-damage|p1a: Rhyhorn|72/100
+|move|p1a: Rhyhorn|Earthquake|p2a: Charizard
+|-immune|p2a: Charizard
+|
+|upkeep
+|turn|31
+|
+|switch|p2a: Shellder|Shellder, L90|237/237 slp
+|move|p1a: Rhyhorn|Substitute|p1a: Rhyhorn
+|-start|p1a: Rhyhorn|Substitute
+|-damage|p1a: Rhyhorn|47/100
+|
+|upkeep
+|turn|32
+|
+|switch|p2a: Snorlax|Snorlax, L69|272/363
+|switch|p1a: Hypno|Hypno, L72|34/100
+|
+|upkeep
+|turn|33
+|
+|switch|p2a: Dragonite|Dragonite, L74|287/287
+|move|p1a: Hypno|Hypnosis|p2a: Dragonite
+|-message|Sleep Clause Mod activated.
+|-hint|Sleep Clause Mod prevents players from putting more than one of their opponent's Pokémon to sleep at a time
+|
+|upkeep
+|turn|34
+|
+|switch|p2a: Snorlax|Snorlax, L69|272/363
+|move|p1a: Hypno|Thunder Wave|p2a: Snorlax
+|-status|p2a: Snorlax|par
+|
+|upkeep
+|turn|35
+|
+|move|p2a: Snorlax|Blizzard|p1a: Hypno
+|-damage|p1a: Hypno|18/100
+|move|p1a: Hypno|Counter|p2a: Snorlax
+|-fail|p1a: Hypno
+|
+|upkeep
+|turn|36
+|
+|move|p2a: Snorlax|Body Slam|p1a: Hypno
+|-damage|p1a: Hypno|0 fnt
+|faint|p1a: Hypno
+|
+|switch|p1a: Ditto|Ditto|72/100
+|turn|37
+|
+|switch|p1a: Venusaur|Venusaur, L73|72/100 par
+|move|p2a: Snorlax|Blizzard|p1a: Venusaur
+|-supereffective|p1a: Venusaur
+|-damage|p1a: Venusaur|37/100 par
+|
+|upkeep
+|turn|38
+|
+|switch|p2a: Dragonite|Dragonite, L74|287/287
+|move|p1a: Venusaur|Swords Dance|p1a: Venusaur
+|-boost|p1a: Venusaur|atk|2
+|
+|upkeep
+|turn|39
+|
+|switch|p1a: Ditto|Ditto|72/100
+|move|p2a: Dragonite|Thunder Wave|p1a: Ditto
+|-status|p1a: Ditto|par
+|
+|upkeep
+|turn|40
+|
+|switch|p2a: Shellder|Shellder, L90|237/237 slp
+|move|p1a: Ditto|Transform|p2a: Shellder
+|-transform|p1a: Ditto|p2a: Shellder
+|
+|upkeep
+|turn|41
+|
+|switch|p1a: Venusaur|Venusaur, L73|37/100 par
+|switch|p2a: Snorlax|Snorlax, L69|272/363 par
+|
+|upkeep
+|turn|42
+|
+|switch|p2a: Jolteon|Jolteon, L69|1/232
+|move|p1a: Venusaur|Body Slam|p2a: Jolteon
+|-damage|p2a: Jolteon|0 fnt
+|faint|p2a: Jolteon
+|
+|switch|p2a: Snorlax|Snorlax, L69|272/363 par
+|turn|43
+|
+|switch|p2a: Shellder|Shellder, L90|237/237 slp
+|move|p1a: Venusaur|Body Slam|p2a: Shellder
+|-damage|p2a: Shellder|202/237 slp
+|
+|upkeep
+|turn|44
+|
+|switch|p2a: Charizard|Charizard, L74|161/268
+|move|p1a: Venusaur|Body Slam|p2a: Charizard
+|-damage|p2a: Charizard|113/268
+|
+|upkeep
+|turn|45
+|
+|move|p2a: Charizard|Fire Blast|p1a: Venusaur
+|-supereffective|p1a: Venusaur
+|-damage|p1a: Venusaur|0 fnt
+|faint|p1a: Venusaur
+|
+|switch|p1a: Rhyhorn|Rhyhorn, L84|47/100
+|turn|46
+|
+|switch|p2a: Snorlax|Snorlax, L69|272/363 par
+|move|p1a: Rhyhorn|Substitute|p1a: Rhyhorn
+|-start|p1a: Rhyhorn|Substitute
+|-damage|p1a: Rhyhorn|22/100
+|
+|upkeep
+|turn|47
+|
+|move|p1a: Rhyhorn|Substitute|p1a: Rhyhorn
+|-fail|p1a: Rhyhorn|move: Substitute
+|move|p2a: Snorlax|Body Slam|p1a: Rhyhorn
+|-resisted|p1a: Rhyhorn
+|-activate|p1a: Rhyhorn|Substitute|[damage]
+|
+|upkeep
+|turn|48
+|
+|move|p1a: Rhyhorn|Substitute|p1a: Rhyhorn
+|-fail|p1a: Rhyhorn|move: Substitute
+|move|p2a: Snorlax|Rest|p2a: Snorlax
+|-status|p2a: Snorlax|slp|[from] move: Rest
+|-heal|p2a: Snorlax|363/363 slp|[silent]
+|
+|upkeep
+|turn|49
+|
+|switch|p2a: Shellder|Shellder, L90|202/237 slp
+|move|p1a: Rhyhorn|Rock Slide|p2a: Shellder
+|-damage|p2a: Shellder|145/237 slp
+|
+|upkeep
+|turn|50
+|
+|cant|p2a: Shellder|slp
+|move|p1a: Rhyhorn|Body Slam|p2a: Shellder
+|-damage|p2a: Shellder|102/237 slp
+|
+|upkeep
+|turn|51
+|
+|switch|p2a: Charizard|Charizard, L74|113/268
+|move|p1a: Rhyhorn|Rock Slide|p2a: Charizard
+|-supereffective|p2a: Charizard
+|-damage|p2a: Charizard|0 fnt
+|faint|p2a: Charizard
+|
+|switch|p2a: Snorlax|Snorlax, L69|363/363 slp
+|turn|52
+|
+|switch|p2a: Dragonite|Dragonite, L74|287/287
+|move|p1a: Rhyhorn|Earthquake|p2a: Dragonite
+|-immune|p2a: Dragonite
+|
+|upkeep
+|turn|53
+|
+|move|p2a: Dragonite|Blizzard|p1a: Rhyhorn
+|-supereffective|p1a: Rhyhorn
+|-end|p1a: Rhyhorn|Substitute
+|move|p1a: Rhyhorn|Rock Slide|p2a: Dragonite|[miss]
+|-miss|p1a: Rhyhorn
+|
+|upkeep
+|turn|54
+|
+|move|p2a: Dragonite|Hyper Beam|p1a: Rhyhorn|[miss]
+|-miss|p2a: Dragonite
+|move|p1a: Rhyhorn|Earthquake|p2a: Dragonite
+|-immune|p2a: Dragonite
+|
+|upkeep
+|turn|55
+|
+|move|p2a: Dragonite|Blizzard|p1a: Rhyhorn
+|-supereffective|p1a: Rhyhorn
+|-damage|p1a: Rhyhorn|0 fnt
+|faint|p1a: Rhyhorn
+|
+|switch|p1a: Ditto|Ditto|72/100 par
+|turn|56
+|
+|move|p2a: Dragonite|Thunder Wave|p1a: Ditto
+|-fail|p1a: Ditto|par
+|move|p1a: Ditto|Transform|p2a: Dragonite
+|-transform|p1a: Ditto|p2a: Dragonite
+|
+|upkeep
+|turn|57
+|
+|switch|p2a: Shellder|Shellder, L90|102/237 slp
+|move|p1a: Ditto|Blizzard|p2a: Shellder
+|-resisted|p2a: Shellder
+|-damage|p2a: Shellder|39/237 slp
+|
+|upkeep
+|turn|58
+|
+|switch|p2a: Dragonite|Dragonite, L74|287/287
+|move|p1a: Ditto|Thunder Wave|p2a: Dragonite
+|-status|p2a: Dragonite|par
+|
+|upkeep
+|turn|59
+|
+|switch|p2a: Snorlax|Snorlax, L69|363/363 slp
+|cant|p1a: Ditto|par
+|
+|upkeep
+|turn|60
+|
+|switch|p2a: Shellder|Shellder, L90|39/237 slp
+|cant|p1a: Ditto|par
+|
+|upkeep
+|turn|61
+|
+|move|p1a: Ditto|Body Slam|p2a: Shellder
+|-damage|p2a: Shellder|0 fnt
+|faint|p2a: Shellder
+|
+|switch|p2a: Snorlax|Snorlax, L69|363/363 slp
+|turn|62
+|
+|move|p1a: Ditto|Body Slam|p2a: Snorlax
+|-damage|p2a: Snorlax|250/363 slp
+|cant|p2a: Snorlax|slp
+|
+|upkeep
+|turn|63
+|
+|switch|p2a: Dragonite|Dragonite, L74|287/287 par
+|move|p1a: Ditto|Blizzard|p2a: Dragonite
+|-supereffective|p2a: Dragonite
+|-damage|p2a: Dragonite|0 fnt
+|faint|p2a: Dragonite
+|
+|switch|p2a: Snorlax|Snorlax, L69|250/363 slp
+|turn|64
+|
+|move|p1a: Ditto|Thunder Wave|p2a: Snorlax
+|-fail|p2a: Snorlax
+|-curestatus|p2a: Snorlax|slp|[msg]
+|
+|upkeep
+|turn|65
+|
+|move|p1a: Ditto|Body Slam|p2a: Snorlax
+|-damage|p2a: Snorlax|136/363
+|move|p2a: Snorlax|Blizzard|p1a: Ditto
+|-supereffective|p1a: Ditto
+|-damage|p1a: Ditto|8/100 par
+|
+|upkeep
+|turn|66
+|
+|move|p1a: Ditto|Body Slam|p2a: Snorlax
+|-damage|p2a: Snorlax|23/363
+|move|p2a: Snorlax|Body Slam|p1a: Ditto
+|-damage|p1a: Ditto|0 fnt
+|faint|p1a: Ditto
+|
+|win|RandOpp0phdepc
+    </script>
+</div>
+
+<div class="battle-log battle-log-inline" style="display:none"></div>
+
+<script>
+    let daily = Math.floor(Date.now() / 1000 / 60 / 60 / 24); document.write('<script src="https://play.pokemonshowdown.com/js/replay-embed.js?version' + daily + '"></' + 'script>');
+</script>
+
+<p style="text-align:center"> Replay created by <a href="https://github.com/hsahovic/poke-env">poke-env</a>, with code from <a
+        href="https://github.com/smogon/pokemon-showdown"> pokemon-showdown</a>. If something goes wrong, don't hesitate
+    to open an <a href="https://github.com/hsahovic/poke-env/issues">issue!</a></p>

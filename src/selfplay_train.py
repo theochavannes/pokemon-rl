@@ -81,13 +81,10 @@ class OpponentSwapCallback(BaseCallback):
         self.model.save(self.frozen_path)
         swapped = 0
         for env in self.env.envs:
-            try:
-                opponent = env.env.env.opponent
-                if hasattr(opponent, "swap_model"):
-                    opponent.swap_model(self.frozen_path)
-                    swapped += 1
-            except AttributeError:
-                pass
+            opp = getattr(env, "_opponent", None)
+            if opp and hasattr(opp, "swap_model"):
+                opp.swap_model(self.frozen_path)
+                swapped += 1
         if self.verbose and swapped > 0:
             print(f"  [SelfPlay] Opponent updated at step {self.num_timesteps:,}")
 
@@ -176,6 +173,13 @@ def main(run_id: str | None = None, new_run: bool = False) -> None:
     model.tensorboard_log = run.logs_dir
     model.verbose = 0
 
+    # Collect opponent refs for shaping decay
+    opponents = []
+    if hasattr(env, "envs"):
+        for e in env.envs:
+            if hasattr(e, "_opponent"):
+                opponents.append(e._opponent)
+
     win_rate_cb = WinRateCallback(
         window=100,
         eval_freq=10_000,
@@ -185,6 +189,12 @@ def main(run_id: str | None = None, new_run: bool = False) -> None:
         verbose=1,
         phase_label="Self",
         training_log_path=run.training_log,
+        run_id=run.run_id,
+        opponents=opponents,
+        run_manager=run,
+        phase_name="selfplay",
+        selfplay_path=frozen_path,
+        env=env,
     )
     swap_cb = OpponentSwapCallback(env=env, frozen_path=frozen_path, update_freq=OPPONENT_UPDATE_FREQ)
     checkpoint_cb = CheckpointCallback(
