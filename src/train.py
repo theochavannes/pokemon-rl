@@ -59,7 +59,7 @@ CURRICULUM = [
         name="A",
         opponent_type="random",
         phase_label="Random",
-        target_wr=0.99,
+        target_wr=0.95,
         max_steps=200_000,
         shaping_factor=1.0,
     ),
