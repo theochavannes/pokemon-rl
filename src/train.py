@@ -11,6 +11,8 @@ TensorBoard:
     tensorboard --logdir logs/
 """
 
+import atexit
+import ctypes
 import os
 import sys
 from functools import partial
@@ -33,6 +35,7 @@ BATTLE_FORMAT = "gen1randombattle"
 TOTAL_TIMESTEPS = 500_000
 MODEL_DIR = "models"
 LOG_DIR = "logs"
+REPLAY_DIR = "replays/phase4"
 
 # N_ENVS=1 uses DummyVecEnv for easy debugging.
 # To scale: set N_ENVS=4 and switch to SubprocVecEnv (see comment in main()).
@@ -54,12 +57,29 @@ PPO_KWARGS = dict(
 )
 
 
+def _prevent_sleep() -> None:
+    """Prevent Windows from sleeping during training (ctypes, no extra deps)."""
+    ES_CONTINUOUS = 0x80000000
+    ES_SYSTEM_REQUIRED = 0x00000001
+    ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+    atexit.register(
+        lambda: ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+    )
+    print("Sleep prevention: ON (restored automatically on exit)")
+
+
 def main() -> None:
+    _prevent_sleep()
+
     os.makedirs(MODEL_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(REPLAY_DIR, exist_ok=True)
 
-    # --- Build vectorised environment ---
-    env_fns = [partial(make_env, env_index=i, battle_format=BATTLE_FORMAT) for i in range(N_ENVS)]
+    # --- Build vectorised environment (replays saved to replays/phase4/) ---
+    env_fns = [
+        partial(make_env, env_index=i, battle_format=BATTLE_FORMAT, save_replays=REPLAY_DIR)
+        for i in range(N_ENVS)
+    ]
 
     # DummyVecEnv: single process, easy to debug.
     # SubprocVecEnv upgrade path (Phase 4 scale-up):
@@ -75,6 +95,8 @@ def main() -> None:
         window=100,
         eval_freq=10_000,
         save_path=MODEL_DIR,
+        replay_dir=REPLAY_DIR,
+        notable_dir="replays/notable",
         verbose=1,
     )
     checkpoint_cb = CheckpointCallback(
@@ -87,6 +109,7 @@ def main() -> None:
     # --- Train ---
     print(f"Training MaskablePPO for {TOTAL_TIMESTEPS:,} steps ({N_ENVS} env(s))...")
     print(f"TensorBoard: tensorboard --logdir {LOG_DIR}")
+    print(f"Replays:     {REPLAY_DIR}/")
     print()
 
     model.learn(

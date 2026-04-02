@@ -208,7 +208,7 @@ class SB3Wrapper(gymnasium.Wrapper):
         return self._last_action_mask
 
 
-def make_env(env_index: int = 0, battle_format: str = "gen1randombattle") -> SB3Wrapper:
+def make_env(env_index: int = 0, battle_format: str = "gen1randombattle", save_replays: bool | str = False) -> SB3Wrapper:
     """
     Factory function for creating a single SB3-compatible Gen 1 environment.
 
@@ -232,6 +232,7 @@ def make_env(env_index: int = 0, battle_format: str = "gen1randombattle") -> SB3
         account_configuration2=AccountConfiguration(f"RandOpp{env_index}{suffix}", None),
         battle_format=battle_format,
         log_level=25,
+        save_replays=save_replays,
     )
     opponent = RandomPlayer(
         battle_format=battle_format,
