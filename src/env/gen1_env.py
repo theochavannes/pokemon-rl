@@ -6,13 +6,25 @@ Wraps poke-env's SinglesEnv for use with MaskablePPO.
 Observation space : Box(-1, 1, shape=(64,), float32)
 Action space      : Discrete — provided by SinglesEnv, masked via action_masks()
 Reward            : +1.0 win | -1.0 loss | 0.0 ongoing
+
+Env stack for training:
+    Gen1Env (SinglesEnv subclass)
+        ↓
+    SingleAgentWrapper   obs = {"observation": np.array(64,), "action_mask": np.array(N,)}
+        ↓
+    SB3Wrapper           obs = np.array(64,)  +  action_masks() -> bool array
+        ↓
+    DummyVecEnv / SubprocVecEnv
 """
 
 import numpy as np
+import gymnasium
 from gymnasium.spaces import Box
 from poke_env.battle.status import Status
 from poke_env.data import GenData
 from poke_env.environment.singles_env import SinglesEnv
+from poke_env.environment.single_agent_wrapper import SingleAgentWrapper
+from poke_env.ps_client.account_configuration import AccountConfiguration
 
 _GEN1_TYPE_CHART = GenData.from_gen(1).type_chart
 
@@ -159,3 +171,58 @@ class Gen1Env(SinglesEnv):
 
     def describe_embedding(self):
         return Box(low=-1.0, high=1.0, shape=(64,), dtype=np.float32)
+
+
+class SB3Wrapper(gymnasium.Wrapper):
+    """
+    Adapts SingleAgentWrapper's dict observations to flat numpy arrays for SB3.
+
+    SingleAgentWrapper returns obs = {"observation": array(64,), "action_mask": array(N,)}
+    This wrapper unpacks it so SB3 sees a plain Box observation and action_masks() method.
+    """
+
+    def __init__(self, env: SingleAgentWrapper):
+        super().__init__(env)
+        self.observation_space = env.observation_space["observation"]
+        self._last_action_mask = np.ones(env.action_space.n, dtype=bool)
+
+    def step(self, action):
+        obs_dict, reward, terminated, truncated, info = self.env.step(action)
+        self._last_action_mask = obs_dict["action_mask"].astype(bool)
+        return obs_dict["observation"], reward, terminated, truncated, info
+
+    def reset(self, **kwargs):
+        obs_dict, info = self.env.reset(**kwargs)
+        self._last_action_mask = obs_dict["action_mask"].astype(bool)
+        return obs_dict["observation"], info
+
+    def action_masks(self) -> np.ndarray:
+        return self._last_action_mask
+
+
+def make_env(env_index: int = 0, battle_format: str = "gen1randombattle") -> SB3Wrapper:
+    """
+    Factory function for creating a single SB3-compatible Gen 1 environment.
+
+    Each env gets unique usernames to allow parallel instances without conflicts.
+    The opponent player is a puppet (start_listening=False) — it provides move
+    choices but has no WebSocket connection; the battle is injected directly.
+
+    Use with functools.partial for SubprocVecEnv (lambdas are not picklable):
+        envs = SubprocVecEnv([partial(make_env, i) for i in range(N_ENVS)])
+    """
+    from poke_env.player.baselines import RandomPlayer
+
+    inner = Gen1Env(
+        account_configuration1=AccountConfiguration(f"PPOAgent_{env_index}", None),
+        account_configuration2=AccountConfiguration(f"RandomOpp_{env_index}", None),
+        battle_format=battle_format,
+        log_level=25,
+    )
+    opponent = RandomPlayer(
+        battle_format=battle_format,
+        account_configuration=AccountConfiguration(f"RandPuppet_{env_index}", None),
+        start_listening=False,
+        log_level=25,
+    )
+    return SB3Wrapper(SingleAgentWrapper(inner, opponent))
