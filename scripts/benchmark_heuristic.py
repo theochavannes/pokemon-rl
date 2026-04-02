@@ -22,7 +22,11 @@ async def main() -> None:
     # Import here so the module is importable without triggering poke-env init
     from src.agents.heuristic_agent import MaxDamagePlayer, RandomPlayer
 
-    max_player = MaxDamagePlayer(battle_format=BATTLE_FORMAT, log_level=25)
+    max_player = MaxDamagePlayer(
+        battle_format=BATTLE_FORMAT,
+        log_level=25,
+        save_replays="replays/phase3",
+    )
     rand_player = RandomPlayer(battle_format=BATTLE_FORMAT, log_level=25)
 
     print(f"Running {N_BATTLES} battles: MaxDamagePlayer vs RandomPlayer ...")

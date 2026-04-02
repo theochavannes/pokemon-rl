@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<!-- version 1 -->
+<title>battle-gen1randombattle-173</title>
+<style>
+    html,
+    body {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+        margin: 0;
+        padding: 0;
+    }
+
+    body {
+        padding: 12px 0;
+    }
+
+    .battle-log {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+    }
+
+    .battle-log-inline {
+        border: 1px solid #AAAAAA;
+        background: #EEF2F5;
+        color: black;
+        max-width: 640px;
+        margin: 0 auto 80px;
+        padding-bottom: 5px;
+    }
+
+    .battle-log .inner {
+        padding: 4px 8px 0px 8px;
+    }
+
+    .battle-log .inner-preempt {
+        padding: 0 8px 4px 8px;
+    }
+
+    .battle-log .inner-after {
+        margin-top: 0.5em;
+    }
+
+    .battle-log h2 {
+        margin: 0.5em -8px;
+        padding: 4px 8px;
+        border: 1px solid #AAAAAA;
+        background: #E0E7EA;
+        border-left: 0;
+        border-right: 0;
+        font-family: Verdana, sans-serif;
+        font-size: 13pt;
+    }
+
+    .backprop {
+        top: 0;
+    }
+
+    .battle-log .chat {
+        vertical-align: middle;
+        padding: 3px 0 3px 0;
+        font-size: 8pt;
+    }
+
+    .battle-log .chat strong {
+        color: #40576A;
+    }
+
+    .battle-log .chat em {
+        padding: 1px 4px 1px 3px;
+        color: #000000;
+        font-style: normal;
+    }
+
+    .chat.mine {
+        background: rgba(0, 0, 0, 0.05);
+        margin-left: -8px;
+        margin-right: -8px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .spoiler {
+        color: #BBBBBB;
+        background: #BBBBBB;
+        padding: 0px 3px;
+    }
+
+    .spoiler:hover,
+    .spoiler:active,
+    .spoiler-shown {
+        color: #000000;
+        background: #E2E2E2;
+        padding: 0px 3px;
+    }
+
+    .spoiler a {
+        color: #BBBBBB;
+    }
+
+    .spoiler:hover a,
+    .spoiler:active a,
+    .spoiler-shown a {
+        color: #2288CC;
+    }
+
+    .chat code,
+    .chat .spoiler:hover code,
+    .chat .spoiler:active code,
+    .chat .spoiler-shown code {
+        border: 1px solid #C0C0C0;
+        background: #EEEEEE;
+        color: black;
+        padding: 0 2px;
+    }
+
+    .chat .spoiler code {
+        border: 1px solid #CCCCCC;
+        background: #CCCCCC;
+        color: #CCCCCC;
+    }
+
+    .battle-log .rated {
+        padding: 3px 4px;
+    }
+
+    .battle-log .rated strong {
+        color: white;
+        background: #89A;
+        padding: 1px 4px;
+        border-radius: 4px;
+    }
+
+    .spacer {
+        margin-top: 0.5em;
+    }
+
+    .message-announce {
+        background: #6688AA;
+        color: white;
+        padding: 1px 4px 2px;
+    }
+
+    .message-announce a,
+    .broadcast-green a,
+    .broadcast-blue a,
+    .broadcast-red a {
+        color: #DDEEFF;
+    }
+
+    .broadcast-green {
+        background-color: #559955;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .broadcast-blue {
+        background-color: #6688AA;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .infobox {
+        border: 1px solid #6688AA;
+        padding: 2px 4px;
+    }
+
+    .infobox-limited {
+        max-height: 200px;
+        overflow: auto;
+        overflow-x: hidden;
+    }
+
+    .broadcast-red {
+        background-color: #AA5544;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .message-learn-canlearn {
+        font-weight: bold;
+        color: #228822;
+        text-decoration: underline;
+    }
+
+    .message-learn-cannotlearn {
+        font-weight: bold;
+        color: #CC2222;
+        text-decoration: underline;
+    }
+
+    .message-effect-weak {
+        font-weight: bold;
+        color: #CC2222;
+    }
+
+    .message-effect-resist {
+        font-weight: bold;
+        color: #6688AA;
+    }
+
+    .message-effect-immune {
+        font-weight: bold;
+        color: #666666;
+    }
+
+    .message-learn-list {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    .message-throttle-notice,
+    .message-error {
+        color: #992222;
+    }
+
+    .message-overflow,
+    .chat small.message-overflow {
+        font-size: 0pt;
+    }
+
+    .message-overflow::before {
+        font-size: 9pt;
+        content: '...';
+    }
+
+    .subtle {
+        color: #3A4A66;
+    }
+</style>
+<div class="wrapper replay-wrapper" style="max-width:1180px;margin:0 auto">
+    <input type="hidden" name="replayid" value="unregisteredserver-gen8randombattle-320064" />
+    <div class="battle"></div>
+    <div class="battle-log"></div>
+    <div class="replay-controls"></div>
+    <div class="replay-controls-2"></div>
+    <h1 style="font-weight:normal;text-align:center"><strong>poke-env battle replay</strong><br />battle-gen1randombattle-173<br /><a
+            href="http://pokemonshowdown.com/users/randomplayer1" class="subtle" target="_blank">MaxDamagePlayer 1</a>
+        vs. <a href="http://pokemonshowdown.com/users/randomplayer2" class="subtle"
+            target="_blank">RandomPlayer 1</a></h1>
+    <script type="text/plain" class="battle-log-data">
+    >battle-gen1randombattle-173
+|init|battle
+|title|MaxDamagePlayer 1 vs. RandomPlayer 1
+|j|☆MaxDamagePlayer 1
+|j|☆RandomPlayer 1
+|gametype|singles
+|player|p1|MaxDamagePlayer 1|2|
+|player|p2|RandomPlayer 1|101|
+|gen|1
+|tier|[Gen 1] Random Battle
+|rule|Desync Clause Mod: Desyncs changed to move failure.
+|rule|HP Percentage Mod: HP is shown in percentages
+|rule|Endless Battle Clause: Forcing endless battles is banned
+|rule|Sleep Clause Mod: Limit one foe put to sleep
+|rule|Freeze Clause Mod: Limit one foe frozen
+|rule|Species Clause: Limit one of each Pokémon
+|rule|OHKO Clause: OHKO moves are banned
+|rule|Evasion Moves Clause: Evasion moves are banned
+|
+|teamsize|p1|6
+|teamsize|p2|6
+|start
+|switch|p1a: Butterfree|Butterfree, L77|251/251
+|switch|p2a: Haunter|Haunter, L74|100/100
+|turn|1
+|
+|switch|p2a: Kangaskhan|Kangaskhan, L73|100/100
+|move|p1a: Butterfree|Psychic|p2a: Kangaskhan
+|-damage|p2a: Kangaskhan|72/100
+|
+|upkeep
+|turn|2
+|
+|move|p2a: Kangaskhan|Body Slam|p1a: Butterfree
+|-damage|p1a: Butterfree|152/251
+|-status|p1a: Butterfree|par
+|move|p1a: Butterfree|Double-Edge|p2a: Kangaskhan
+|-damage|p2a: Kangaskhan|58/100
+|-damage|p1a: Butterfree|141/251 par|[from] Recoil|[of] p2a: Kangaskhan
+|
+|upkeep
+|turn|3
+|
+|move|p2a: Kangaskhan|Hyper Beam|p1a: Butterfree
+|-damage|p1a: Butterfree|0 fnt
+|faint|p1a: Butterfree
+|
+|switch|p1a: Charmander|Charmander, L90|253/253
+|turn|4
+|
+|move|p1a: Charmander|Submission|p2a: Kangaskhan
+|-crit|p2a: Kangaskhan
+|-supereffective|p2a: Kangaskhan
+|-damage|p2a: Kangaskhan|0 fnt
+|-damage|p1a: Charmander|210/253|[from] Recoil|[of] p2a: Kangaskhan
+|faint|p2a: Kangaskhan
+|
+|switch|p2a: Charizard|Charizard, L74|100/100
+|turn|5
+|
+|switch|p2a: Poliwag|Poliwag, L86|100/100
+|move|p1a: Charmander|Body Slam|p2a: Poliwag
+|-crit|p2a: Poliwag
+|-damage|p2a: Poliwag|47/100
+|-status|p2a: Poliwag|par
+|
+|upkeep
+|turn|6
+|
+|switch|p2a: Haunter|Haunter, L74|100/100
+|move|p1a: Charmander|Body Slam|p2a: Haunter
+|-immune|p2a: Haunter
+|
+|upkeep
+|turn|7
+|
+|move|p2a: Haunter|Hypnosis|p1a: Charmander|[miss]
+|-miss|p2a: Haunter
+|move|p1a: Charmander|Fire Blast|p2a: Haunter
+|-damage|p2a: Haunter|58/100
+|
+|upkeep
+|turn|8
+|
+|switch|p2a: Kadabra|Kadabra, L74|100/100
+|move|p1a: Charmander|Fire Blast|p2a: Kadabra
+|-damage|p2a: Kadabra|57/100
+|
+|upkeep
+|turn|9
+|
+|switch|p2a: Charizard|Charizard, L74|100/100
+|move|p1a: Charmander|Fire Blast|p2a: Charizard|[miss]
+|-miss|p1a: Charmander
+|
+|upkeep
+|turn|10
+|
+|move|p2a: Charizard|Fire Blast|p1a: Charmander
+|-resisted|p1a: Charmander
+|-damage|p1a: Charmander|156/253
+|move|p1a: Charmander|Body Slam|p2a: Charizard
+|-damage|p2a: Charizard|78/100
+|
+|upkeep
+|turn|11
+|
+|move|p2a: Charizard|Body Slam|p1a: Charmander
+|-crit|p1a: Charmander
+|-damage|p1a: Charmander|32/253
+|move|p1a: Charmander|Body Slam|p2a: Charizard
+|-damage|p2a: Charizard|56/100
+|
+|upkeep
+|turn|12
+|
+|move|p2a: Charizard|Fire Blast|p1a: Charmander
+|-resisted|p1a: Charmander
+|-damage|p1a: Charmander|0 fnt
+|faint|p1a: Charmander
+|
+|switch|p1a: Grimer|Grimer, L90|327/327
+|turn|13
+|
+|move|p2a: Charizard|Earthquake|p1a: Grimer
+|-supereffective|p1a: Grimer
+|-damage|p1a: Grimer|204/327
+|move|p1a: Grimer|Explosion|p2a: Charizard
+|-damage|p2a: Charizard|0 fnt
+|faint|p2a: Charizard
+|faint|p1a: Grimer
+|
+|switch|p2a: Kadabra|Kadabra, L74|57/100
+|switch|p1a: Exeggutor|Exeggutor, L68|270/270
+|turn|14
+|
+|move|p2a: Kadabra|Psychic|p1a: Exeggutor
+|-resisted|p1a: Exeggutor
+|-damage|p1a: Exeggutor|225/270
+|move|p1a: Exeggutor|Explosion|p2a: Kadabra
+|-crit|p2a: Kadabra
+|-damage|p2a: Kadabra|0 fnt
+|faint|p2a: Kadabra
+|faint|p1a: Exeggutor
+|
+|switch|p2a: Arbok|Arbok, L78|100/100
+|switch|p1a: Eevee|Eevee, L88|276/276
+|turn|15
+|
+|move|p2a: Arbok|Earthquake|p1a: Eevee
+|-damage|p1a: Eevee|199/276
+|move|p1a: Eevee|Double-Edge|p2a: Arbok
+|-damage|p2a: Arbok|57/100
+|-damage|p1a: Eevee|172/276|[from] Recoil|[of] p2a: Arbok
+|
+|upkeep
+|turn|16
+|
+|move|p2a: Arbok|Rock Slide|p1a: Eevee
+|-damage|p1a: Eevee|115/276
+|move|p1a: Eevee|Double-Edge|p2a: Arbok
+|-damage|p2a: Arbok|15/100
+|-damage|p1a: Eevee|89/276|[from] Recoil|[of] p2a: Arbok
+|
+|upkeep
+|turn|17
+|
+|switch|p2a: Poliwag|Poliwag, L86|47/100 par
+|move|p1a: Eevee|Double-Edge|p2a: Poliwag
+|-damage|p2a: Poliwag|0 fnt
+|-damage|p1a: Eevee|61/276|[from] Recoil|[of] p2a: Poliwag
+|faint|p2a: Poliwag
+|
+|switch|p2a: Arbok|Arbok, L78|15/100
+|turn|18
+|
+|move|p2a: Arbok|Rock Slide|p1a: Eevee
+|-damage|p1a: Eevee|2/276
+|move|p1a: Eevee|Double-Edge|p2a: Arbok
+|-damage|p2a: Arbok|0 fnt
+|-damage|p1a: Eevee|0 fnt|[from] Recoil|[of] p2a: Arbok
+|faint|p2a: Arbok
+|faint|p1a: Eevee
+|
+|switch|p2a: Haunter|Haunter, L74|58/100
+|switch|p1a: Drowzee|Drowzee, L84|272/272
+|turn|19
+|
+|move|p2a: Haunter|Hypnosis|p1a: Drowzee
+|-status|p1a: Drowzee|slp|[from] move: Hypnosis
+|cant|p1a: Drowzee|slp
+|
+|upkeep
+|turn|20
+|
+|move|p2a: Haunter|Hypnosis|p1a: Drowzee
+|-fail|p1a: Drowzee|slp
+|cant|p1a: Drowzee|slp
+|
+|upkeep
+|turn|21
+|
+|move|p2a: Haunter|Thunderbolt|p1a: Drowzee
+|-crit|p1a: Drowzee
+|-damage|p1a: Drowzee|160/272 slp
+|cant|p1a: Drowzee|slp
+|
+|upkeep
+|turn|22
+|
+|move|p2a: Haunter|Thunderbolt|p1a: Drowzee
+|-damage|p1a: Drowzee|104/272 slp
+|cant|p1a: Drowzee|slp
+|
+|upkeep
+|turn|23
+|
+|move|p2a: Haunter|Hypnosis|p1a: Drowzee
+|-fail|p1a: Drowzee|slp
+|cant|p1a: Drowzee|slp
+|
+|upkeep
+|turn|24
+|
+|move|p2a: Haunter|Thunderbolt|p1a: Drowzee
+|-crit|p1a: Drowzee
+|-damage|p1a: Drowzee|0 fnt
+|faint|p1a: Drowzee
+|
+|win|RandomPlayer 1
+    </script>
+</div>
+
+<div class="battle-log battle-log-inline" style="display:none"></div>
+
+<script>
+    let daily = Math.floor(Date.now() / 1000 / 60 / 60 / 24); document.write('<script src="https://play.pokemonshowdown.com/js/replay-embed.js?version' + daily + '"></' + 'script>');
+</script>
+
+<p style="text-align:center"> Replay created by <a href="https://github.com/hsahovic/poke-env">poke-env</a>, with code from <a
+        href="https://github.com/smogon/pokemon-showdown"> pokemon-showdown</a>. If something goes wrong, don't hesitate
+    to open an <a href="https://github.com/hsahovic/poke-env/issues">issue!</a></p>

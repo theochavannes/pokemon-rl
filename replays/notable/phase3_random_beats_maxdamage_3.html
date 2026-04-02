@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<!-- version 1 -->
+<title>battle-gen1randombattle-191</title>
+<style>
+    html,
+    body {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+        margin: 0;
+        padding: 0;
+    }
+
+    body {
+        padding: 12px 0;
+    }
+
+    .battle-log {
+        font-family: Verdana, sans-serif;
+        font-size: 10pt;
+    }
+
+    .battle-log-inline {
+        border: 1px solid #AAAAAA;
+        background: #EEF2F5;
+        color: black;
+        max-width: 640px;
+        margin: 0 auto 80px;
+        padding-bottom: 5px;
+    }
+
+    .battle-log .inner {
+        padding: 4px 8px 0px 8px;
+    }
+
+    .battle-log .inner-preempt {
+        padding: 0 8px 4px 8px;
+    }
+
+    .battle-log .inner-after {
+        margin-top: 0.5em;
+    }
+
+    .battle-log h2 {
+        margin: 0.5em -8px;
+        padding: 4px 8px;
+        border: 1px solid #AAAAAA;
+        background: #E0E7EA;
+        border-left: 0;
+        border-right: 0;
+        font-family: Verdana, sans-serif;
+        font-size: 13pt;
+    }
+
+    .backprop {
+        top: 0;
+    }
+
+    .battle-log .chat {
+        vertical-align: middle;
+        padding: 3px 0 3px 0;
+        font-size: 8pt;
+    }
+
+    .battle-log .chat strong {
+        color: #40576A;
+    }
+
+    .battle-log .chat em {
+        padding: 1px 4px 1px 3px;
+        color: #000000;
+        font-style: normal;
+    }
+
+    .chat.mine {
+        background: rgba(0, 0, 0, 0.05);
+        margin-left: -8px;
+        margin-right: -8px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .spoiler {
+        color: #BBBBBB;
+        background: #BBBBBB;
+        padding: 0px 3px;
+    }
+
+    .spoiler:hover,
+    .spoiler:active,
+    .spoiler-shown {
+        color: #000000;
+        background: #E2E2E2;
+        padding: 0px 3px;
+    }
+
+    .spoiler a {
+        color: #BBBBBB;
+    }
+
+    .spoiler:hover a,
+    .spoiler:active a,
+    .spoiler-shown a {
+        color: #2288CC;
+    }
+
+    .chat code,
+    .chat .spoiler:hover code,
+    .chat .spoiler:active code,
+    .chat .spoiler-shown code {
+        border: 1px solid #C0C0C0;
+        background: #EEEEEE;
+        color: black;
+        padding: 0 2px;
+    }
+
+    .chat .spoiler code {
+        border: 1px solid #CCCCCC;
+        background: #CCCCCC;
+        color: #CCCCCC;
+    }
+
+    .battle-log .rated {
+        padding: 3px 4px;
+    }
+
+    .battle-log .rated strong {
+        color: white;
+        background: #89A;
+        padding: 1px 4px;
+        border-radius: 4px;
+    }
+
+    .spacer {
+        margin-top: 0.5em;
+    }
+
+    .message-announce {
+        background: #6688AA;
+        color: white;
+        padding: 1px 4px 2px;
+    }
+
+    .message-announce a,
+    .broadcast-green a,
+    .broadcast-blue a,
+    .broadcast-red a {
+        color: #DDEEFF;
+    }
+
+    .broadcast-green {
+        background-color: #559955;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .broadcast-blue {
+        background-color: #6688AA;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .infobox {
+        border: 1px solid #6688AA;
+        padding: 2px 4px;
+    }
+
+    .infobox-limited {
+        max-height: 200px;
+        overflow: auto;
+        overflow-x: hidden;
+    }
+
+    .broadcast-red {
+        background-color: #AA5544;
+        color: white;
+        padding: 2px 4px;
+    }
+
+    .message-learn-canlearn {
+        font-weight: bold;
+        color: #228822;
+        text-decoration: underline;
+    }
+
+    .message-learn-cannotlearn {
+        font-weight: bold;
+        color: #CC2222;
+        text-decoration: underline;
+    }
+
+    .message-effect-weak {
+        font-weight: bold;
+        color: #CC2222;
+    }
+
+    .message-effect-resist {
+        font-weight: bold;
+        color: #6688AA;
+    }
+
+    .message-effect-immune {
+        font-weight: bold;
+        color: #666666;
+    }
+
+    .message-learn-list {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    .message-throttle-notice,
+    .message-error {
+        color: #992222;
+    }
+
+    .message-overflow,
+    .chat small.message-overflow {
+        font-size: 0pt;
+    }
+
+    .message-overflow::before {
+        font-size: 9pt;
+        content: '...';
+    }
+
+    .subtle {
+        color: #3A4A66;
+    }
+</style>
+<div class="wrapper replay-wrapper" style="max-width:1180px;margin:0 auto">
+    <input type="hidden" name="replayid" value="unregisteredserver-gen8randombattle-320064" />
+    <div class="battle"></div>
+    <div class="battle-log"></div>
+    <div class="replay-controls"></div>
+    <div class="replay-controls-2"></div>
+    <h1 style="font-weight:normal;text-align:center"><strong>poke-env battle replay</strong><br />battle-gen1randombattle-191<br /><a
+            href="http://pokemonshowdown.com/users/randomplayer1" class="subtle" target="_blank">MaxDamagePlayer 1</a>
+        vs. <a href="http://pokemonshowdown.com/users/randomplayer2" class="subtle"
+            target="_blank">RandomPlayer 1</a></h1>
+    <script type="text/plain" class="battle-log-data">
+    >battle-gen1randombattle-191
+|init|battle
+|title|MaxDamagePlayer 1 vs. RandomPlayer 1
+|j|☆MaxDamagePlayer 1
+|j|☆RandomPlayer 1
+|gametype|singles
+|player|p1|MaxDamagePlayer 1|2|
+|player|p2|RandomPlayer 1|101|
+|gen|1
+|tier|[Gen 1] Random Battle
+|rule|Desync Clause Mod: Desyncs changed to move failure.
+|rule|HP Percentage Mod: HP is shown in percentages
+|rule|Endless Battle Clause: Forcing endless battles is banned
+|rule|Sleep Clause Mod: Limit one foe put to sleep
+|rule|Freeze Clause Mod: Limit one foe frozen
+|rule|Species Clause: Limit one of each Pokémon
+|rule|OHKO Clause: OHKO moves are banned
+|rule|Evasion Moves Clause: Evasion moves are banned
+|
+|teamsize|p1|6
+|teamsize|p2|6
+|start
+|switch|p1a: Krabby|Krabby, L89|235/235
+|switch|p2a: Cloyster|Cloyster, L70|100/100
+|turn|1
+|
+|switch|p2a: Mewtwo|Mewtwo, L60|100/100
+|move|p1a: Krabby|Body Slam|p2a: Mewtwo
+|-damage|p2a: Mewtwo|66/100
+|
+|upkeep
+|turn|2
+|
+|move|p2a: Mewtwo|Psychic|p1a: Krabby
+|-crit|p1a: Krabby
+|-damage|p1a: Krabby|19/235
+|move|p1a: Krabby|Blizzard|p2a: Mewtwo
+|-damage|p2a: Mewtwo|47/100
+|-status|p2a: Mewtwo|frz
+|
+|upkeep
+|turn|3
+|
+|cant|p2a: Mewtwo|frz
+|move|p1a: Krabby|Blizzard|p2a: Mewtwo
+|-damage|p2a: Mewtwo|28/100 frz
+|
+|upkeep
+|turn|4
+|
+|switch|p2a: Cloyster|Cloyster, L70|100/100
+|move|p1a: Krabby|Blizzard|p2a: Cloyster
+|-resisted|p2a: Cloyster
+|-damage|p2a: Cloyster|94/100
+|
+|upkeep
+|turn|5
+|
+|switch|p2a: Pidgey|Pidgey, L95|100/100
+|move|p1a: Krabby|Body Slam|p2a: Pidgey
+|-damage|p2a: Pidgey|66/100
+|
+|upkeep
+|turn|6
+|
+|move|p2a: Pidgey|Double-Edge|p1a: Krabby
+|-damage|p1a: Krabby|0 fnt
+|-damage|p2a: Pidgey|64/100|[from] Recoil|[of] p1a: Krabby
+|faint|p1a: Krabby
+|
+|switch|p1a: Spearow|Spearow, L89|252/252
+|turn|7
+|
+|switch|p2a: Hypno|Hypno, L72|100/100
+|move|p1a: Spearow|Double-Edge|p2a: Hypno
+|-damage|p2a: Hypno|59/100
+|-damage|p1a: Spearow|224/252|[from] Recoil|[of] p2a: Hypno
+|
+|upkeep
+|turn|8
+|
+|move|p1a: Spearow|Double-Edge|p2a: Hypno
+|-damage|p2a: Hypno|19/100
+|-damage|p1a: Spearow|197/252|[from] Recoil|[of] p2a: Hypno
+|move|p2a: Hypno|Hypnosis|p1a: Spearow
+|-status|p1a: Spearow|slp|[from] move: Hypnosis
+|
+|upkeep
+|turn|9
+|
+|cant|p1a: Spearow|slp
+|move|p2a: Hypno|Seismic Toss|p1a: Spearow
+|-damage|p1a: Spearow|125/252 slp
+|
+|upkeep
+|turn|10
+|
+|switch|p2a: Mewtwo|Mewtwo, L60|28/100 frz
+|cant|p1a: Spearow|slp
+|
+|upkeep
+|turn|11
+|
+|switch|p2a: Cloyster|Cloyster, L70|94/100
+|cant|p1a: Spearow|slp
+|
+|upkeep
+|turn|12
+|
+|cant|p1a: Spearow|slp
+|move|p2a: Cloyster|Blizzard|p1a: Spearow
+|-crit|p1a: Spearow
+|-supereffective|p1a: Spearow
+|-damage|p1a: Spearow|0 fnt
+|faint|p1a: Spearow
+|
+|switch|p1a: Ekans|Ekans, L90|246/246
+|turn|13
+|
+|move|p1a: Ekans|Rock Slide|p2a: Cloyster
+|-supereffective|p2a: Cloyster
+|-damage|p2a: Cloyster|65/100
+|move|p2a: Cloyster|Blizzard|p1a: Ekans
+|-damage|p1a: Ekans|129/246
+|
+|upkeep
+|turn|14
+|
+|move|p1a: Ekans|Rock Slide|p2a: Cloyster
+|-supereffective|p2a: Cloyster
+|-damage|p2a: Cloyster|34/100
+|move|p2a: Cloyster|Hyper Beam|p1a: Ekans
+|-damage|p1a: Ekans|31/246
+|-mustrecharge|p2a: Cloyster
+|
+|upkeep
+|turn|15
+|
+|move|p1a: Ekans|Rock Slide|p2a: Cloyster
+|-supereffective|p2a: Cloyster
+|-damage|p2a: Cloyster|5/100
+|cant|p2a: Cloyster|recharge
+|
+|upkeep
+|turn|16
+|
+|switch|p2a: Pidgey|Pidgey, L95|64/100
+|move|p1a: Ekans|Rock Slide|p2a: Pidgey
+|-supereffective|p2a: Pidgey
+|-damage|p2a: Pidgey|19/100
+|
+|upkeep
+|turn|17
+|
+|switch|p2a: Cloyster|Cloyster, L70|5/100
+|move|p1a: Ekans|Rock Slide|p2a: Cloyster
+|-supereffective|p2a: Cloyster
+|-damage|p2a: Cloyster|0 fnt
+|faint|p2a: Cloyster
+|
+|switch|p2a: Pidgey|Pidgey, L95|19/100
+|turn|18
+|
+|switch|p2a: Hypno|Hypno, L72|19/100
+|move|p1a: Ekans|Rock Slide|p2a: Hypno
+|-crit|p2a: Hypno
+|-damage|p2a: Hypno|0 fnt
+|faint|p2a: Hypno
+|
+|switch|p2a: Mewtwo|Mewtwo, L60|28/100 frz
+|turn|19
+|
+|switch|p2a: Pidgey|Pidgey, L95|19/100
+|move|p1a: Ekans|Earthquake|p2a: Pidgey
+|-immune|p2a: Pidgey
+|
+|upkeep
+|turn|20
+|
+|move|p2a: Pidgey|Mirror Move|p2a: Pidgey
+|move|p2a: Pidgey|Earthquake|p1a: Ekans|[from] Mirror Move
+|-supereffective|p1a: Ekans
+|-damage|p1a: Ekans|0 fnt
+|faint|p1a: Ekans
+|
+|switch|p1a: Nidorina|Nidorina, L82|283/283
+|turn|21
+|
+|switch|p2a: Mewtwo|Mewtwo, L60|28/100 frz
+|move|p1a: Nidorina|Blizzard|p2a: Mewtwo
+|-damage|p2a: Mewtwo|7/100 frz
+|
+|upkeep
+|turn|22
+|
+|switch|p2a: Pidgey|Pidgey, L95|19/100
+|move|p1a: Nidorina|Blizzard|p2a: Pidgey|[miss]
+|-miss|p1a: Nidorina
+|
+|upkeep
+|turn|23
+|
+|move|p2a: Pidgey|Sky Attack||[still]
+|-prepare|p2a: Pidgey|Sky Attack
+|move|p1a: Nidorina|Blizzard|p2a: Pidgey
+|-supereffective|p2a: Pidgey
+|-damage|p2a: Pidgey|0 fnt
+|faint|p2a: Pidgey
+|
+|switch|p2a: Geodude|Geodude, L88|100/100
+|turn|24
+|
+|switch|p2a: Chansey|Chansey, L68|100/100
+|move|p1a: Nidorina|Blizzard|p2a: Chansey
+|-damage|p2a: Chansey|87/100
+|
+|upkeep
+|turn|25
+|
+|move|p1a: Nidorina|Blizzard|p2a: Chansey
+|-damage|p2a: Chansey|75/100
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-heal|p2a: Chansey|100/100
+|
+|upkeep
+|turn|26
+|
+|move|p1a: Nidorina|Blizzard|p2a: Chansey
+|-damage|p2a: Chansey|88/100
+|move|p2a: Chansey|Sing|p1a: Nidorina
+|-status|p1a: Nidorina|slp|[from] move: Sing
+|
+|upkeep
+|turn|27
+|
+|cant|p1a: Nidorina|slp
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-heal|p2a: Chansey|100/100
+|
+|upkeep
+|turn|28
+|
+|cant|p1a: Nidorina|slp
+|move|p2a: Chansey|Thunder Wave|p1a: Nidorina
+|-fail|p1a: Nidorina
+|
+|upkeep
+|turn|29
+|
+|switch|p2a: Mewtwo|Mewtwo, L60|7/100 frz
+|cant|p1a: Nidorina|slp
+|
+|upkeep
+|turn|30
+|
+|cant|p2a: Mewtwo|frz
+|cant|p1a: Nidorina|slp
+|
+|upkeep
+|turn|31
+|
+|switch|p2a: Geodude|Geodude, L88|100/100
+|cant|p1a: Nidorina|slp
+|
+|upkeep
+|turn|32
+|
+|cant|p1a: Nidorina|slp
+|move|p2a: Geodude|Body Slam|p1a: Nidorina
+|-damage|p1a: Nidorina|211/283 slp
+|
+|upkeep
+|turn|33
+|
+|-curestatus|p1a: Nidorina|slp|[msg]
+|move|p2a: Geodude|Earthquake|p1a: Nidorina
+|-supereffective|p1a: Nidorina
+|-damage|p1a: Nidorina|0 fnt
+|faint|p1a: Nidorina
+|
+|switch|p1a: Parasect|Parasect, L77|251/251
+|turn|34
+|
+|move|p1a: Parasect|Mega Drain|p2a: Geodude
+|-supereffective|p2a: Geodude
+|-damage|p2a: Geodude|21/100
+|move|p2a: Geodude|Body Slam|p1a: Parasect
+|-damage|p1a: Parasect|188/251
+|
+|upkeep
+|turn|35
+|
+|move|p2a: Geodude|Explosion|p1a: Parasect
+|-damage|p1a: Parasect|0 fnt
+|faint|p1a: Parasect
+|faint|p2a: Geodude
+|
+|switch|p2a: Mewtwo|Mewtwo, L60|7/100 frz
+|switch|p1a: Mewtwo|Mewtwo, L60|253/253
+|turn|36
+|
+|switch|p2a: Chansey|Chansey, L68|100/100
+|move|p1a: Mewtwo|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|85/100
+|
+|upkeep
+|turn|37
+|
+|move|p1a: Mewtwo|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|69/100
+|move|p2a: Chansey|Ice Beam|p1a: Mewtwo
+|-damage|p1a: Mewtwo|209/253
+|
+|upkeep
+|turn|38
+|
+|move|p1a: Mewtwo|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|51/100
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-heal|p2a: Chansey|100/100
+|
+|upkeep
+|turn|39
+|
+|move|p1a: Mewtwo|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|85/100
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-heal|p2a: Chansey|100/100
+|
+|upkeep
+|turn|40
+|
+|move|p1a: Mewtwo|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|83/100
+|-unboost|p2a: Chansey|spa|1
+|-unboost|p2a: Chansey|spd|1
+|move|p2a: Chansey|Sing|p1a: Mewtwo
+|-status|p1a: Mewtwo|slp|[from] move: Sing
+|
+|upkeep
+|turn|41
+|
+|cant|p1a: Mewtwo|slp
+|move|p2a: Chansey|Soft-Boiled|p2a: Chansey
+|-heal|p2a: Chansey|100/100
+|
+|upkeep
+|turn|42
+|
+|cant|p1a: Mewtwo|slp
+|move|p2a: Chansey|Sing|p1a: Mewtwo
+|-fail|p1a: Mewtwo|slp
+|
+|upkeep
+|turn|43
+|
+|cant|p1a: Mewtwo|slp
+|move|p2a: Chansey|Ice Beam|p1a: Mewtwo
+|-damage|p1a: Mewtwo|177/253 slp
+|
+|upkeep
+|turn|44
+|
+|cant|p1a: Mewtwo|slp
+|move|p2a: Chansey|Thunder Wave|p1a: Mewtwo
+|-fail|p1a: Mewtwo
+|
+|upkeep
+|turn|45
+|
+|cant|p1a: Mewtwo|slp
+|move|p2a: Chansey|Ice Beam|p1a: Mewtwo
+|-damage|p1a: Mewtwo|146/253 slp
+|
+|upkeep
+|turn|46
+|
+|switch|p2a: Mewtwo|Mewtwo, L60|7/100 frz
+|cant|p1a: Mewtwo|slp
+|
+|upkeep
+|turn|47
+|
+|switch|p2a: Chansey|Chansey, L68|100/100
+|-curestatus|p1a: Mewtwo|slp|[msg]
+|
+|upkeep
+|turn|48
+|
+|move|p1a: Mewtwo|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|84/100
+|move|p2a: Chansey|Ice Beam|p1a: Mewtwo
+|-damage|p1a: Mewtwo|98/253
+|
+|upkeep
+|turn|49
+|
+|move|p1a: Mewtwo|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|67/100
+|move|p2a: Chansey|Ice Beam|p1a: Mewtwo
+|-damage|p1a: Mewtwo|50/253
+|
+|upkeep
+|turn|50
+|
+|move|p1a: Mewtwo|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|51/100
+|move|p2a: Chansey|Ice Beam|p1a: Mewtwo
+|-damage|p1a: Mewtwo|8/253
+|
+|upkeep
+|turn|51
+|
+|switch|p2a: Mewtwo|Mewtwo, L60|7/100 frz
+|move|p1a: Mewtwo|Psychic|p2a: Mewtwo
+|-resisted|p2a: Mewtwo
+|-damage|p2a: Mewtwo|0 fnt
+|faint|p2a: Mewtwo
+|
+|switch|p2a: Chansey|Chansey, L68|51/100
+|turn|52
+|
+|move|p1a: Mewtwo|Psychic|p2a: Chansey
+|-damage|p2a: Chansey|36/100
+|-unboost|p2a: Chansey|spa|1
+|-unboost|p2a: Chansey|spd|1
+|move|p2a: Chansey|Ice Beam|p1a: Mewtwo
+|-damage|p1a: Mewtwo|0 fnt
+|faint|p1a: Mewtwo
+|
+|win|RandomPlayer 1
+    </script>
+</div>
+
+<div class="battle-log battle-log-inline" style="display:none"></div>
+
+<script>
+    let daily = Math.floor(Date.now() / 1000 / 60 / 60 / 24); document.write('<script src="https://play.pokemonshowdown.com/js/replay-embed.js?version' + daily + '"></' + 'script>');
+</script>
+
+<p style="text-align:center"> Replay created by <a href="https://github.com/hsahovic/poke-env">poke-env</a>, with code from <a
+        href="https://github.com/smogon/pokemon-showdown"> pokemon-showdown</a>. If something goes wrong, don't hesitate
+    to open an <a href="https://github.com/hsahovic/poke-env/issues">issue!</a></p>
