@@ -169,7 +169,7 @@ A plain-language explanation of every tool recommended for this project, what pr
 
 ## How It All Connects
 
-```
+```text
 You write code (or Claude does)
     ↓
 Claude Code hook → auto-formats with Ruff
@@ -180,7 +180,7 @@ Pre-commit hooks → Ruff lint/format + large file check + secret detection
     ↓
 You push / create PR
     ↓
-GitHub Actions CI → Ruff lint + pytest (parallel jobs)
+GitHub Actions CI → Ruff lint + pytest (sequential: test runs after lint passes)
 CodeRabbit → AI code review with line comments
     ↓
 You merge

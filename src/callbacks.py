@@ -14,6 +14,7 @@ Win rate is derived from terminal episode rewards:
 """
 
 import json
+import logging
 import os
 import shutil
 from collections import deque
@@ -22,6 +23,8 @@ from pathlib import Path
 
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
+
+log = logging.getLogger("pokemon_rl.callback")
 
 # Win rate thresholds worth flagging as video milestones.
 # Start at 0.55 — random-vs-random baseline is ~50%, so anything below is noise.
@@ -32,8 +35,16 @@ _REPLAY_MILESTONES = {10_000, 50_000, 100_000, 200_000, 350_000, 500_000}
 
 # Action index labels (Gen 1 singles — 10 actions)
 _ACTION_LABELS = [
-    "switch_1", "switch_2", "switch_3", "switch_4", "switch_5", "switch_6",
-    "move_1", "move_2", "move_3", "move_4",
+    "switch_1",
+    "switch_2",
+    "switch_3",
+    "switch_4",
+    "switch_5",
+    "switch_6",
+    "move_1",
+    "move_2",
+    "move_3",
+    "move_4",
 ]
 
 
@@ -90,7 +101,7 @@ class WinRateCallback(BaseCallback):
         self.phase_label = phase_label or ""
         self.run_id = run_id
         self.epsilon_schedule = epsilon_schedule  # (start, end) or None
-        self.opponents = opponents or []          # opponent player objects
+        self.opponents = opponents or []  # opponent player objects
         self.run_manager = run_manager
         self.phase_name = phase_name
         # Per-run log if provided, otherwise fall back to legacy path
@@ -133,10 +144,11 @@ class WinRateCallback(BaseCallback):
     def _on_training_start(self) -> None:
         self.content_log.parent.mkdir(parents=True, exist_ok=True)
         self._write_content_log_header()
+        label = self.phase_label or "opponent"
+        log.info("Training started — collecting rollouts vs %s", label)
         if self.verbose:
-            label = self.phase_label or "opponent"
             print(f"  Training started — collecting rollouts vs {label}...")
-            print(f"  (first battles will print individually)\n")
+            print("  (first battles will print individually)\n")
 
     def _on_step(self) -> bool:
         # Track action distribution + forced vs voluntary switches
@@ -167,39 +179,48 @@ class WinRateCallback(BaseCallback):
                 self._episode_lengths.append(length)
                 self._epsilon_rewards.append(reward)
 
-                # Print first 10 episodes individually so user sees something early
-                if self.verbose and self._total_episodes <= 10:
+                # Log first 10 episodes individually so user sees something early
+                if self._total_episodes <= 10:
                     result = "WIN" if reward > 0 else "LOSS"
-                    print(f"    battle #{self._total_episodes:>3}: {result}  ({length} turns)")
+                    log.info("battle #%3d: %s  (%d turns)", self._total_episodes, result, length)
+                    if self.verbose:
+                        print(f"    battle #{self._total_episodes:>3}: {result}  ({length} turns)")
 
                     if self._total_episodes == 10:
                         wins = sum(1 for r in self._episode_rewards if r >= 0.5)
-                        print(f"    ... first 10 battles: {wins}W/{10-wins}L — continuing silently until eval\n")
+                        log.info("First 10 battles: %dW/%dL", wins, 10 - wins)
+                        if self.verbose:
+                            print(f"    ... first 10 battles: {wins}W/{10 - wins}L — continuing silently until eval\n")
 
         # Heartbeat: show step progress between evals
-        if self.verbose and self.num_timesteps - self._last_heartbeat_step >= self._heartbeat_freq:
+        if self.num_timesteps - self._last_heartbeat_step >= self._heartbeat_freq:
             self._last_heartbeat_step = self.num_timesteps
             eps = self._total_episodes
-            # Don't print heartbeat if we're about to print a full eval line
+            # Don't log heartbeat if we're about to log a full eval line
             if self._total_episodes - self._last_eval_episode < self.eval_freq_episodes:
                 recent_wins = sum(1 for r in self._episode_rewards if r >= 0.5)
                 recent_losses = len(self._episode_rewards) - recent_wins
-                print(f"    ... step {self.num_timesteps:>6,}  |  {eps} battles (last {len(self._episode_rewards)}: {recent_wins}W/{recent_losses}L)")
+                log.debug(
+                    "step %6d | %d battles (last %d: %dW/%dL)",
+                    self.num_timesteps,
+                    eps,
+                    len(self._episode_rewards),
+                    recent_wins,
+                    recent_losses,
+                )
+                if self.verbose:
+                    print(
+                        f"    ... step {self.num_timesteps:>6,}  |  {eps} battles (last {len(self._episode_rewards)}: {recent_wins}W/{recent_losses}L)"
+                    )
 
-        if (
-            self._total_episodes - self._last_eval_episode >= self.eval_freq_episodes
-            and len(self._episode_rewards) > 0
-        ):
+        if self._total_episodes - self._last_eval_episode >= self.eval_freq_episodes and len(self._episode_rewards) > 0:
             self._last_eval_episode = self._total_episodes
             self._last_log_step = self.num_timesteps
             self._evaluate()
             # Early-stop: only graduate when BOTH conditions are met:
             # 1. Win rate target is sustained (2 consecutive evals)
             # 2. If epsilon annealing is active, epsilon must have reached its end value
-            if (
-                self.stop_at_win_rate is not None
-                and len(self._episode_rewards) >= self.window
-            ):
+            if self.stop_at_win_rate is not None and len(self._episode_rewards) >= self.window:
                 # Check if difficulty has fully annealed (epsilon or temperature)
                 epsilon_done = True
                 if self.epsilon_schedule and self.opponents:
@@ -207,24 +228,44 @@ class WinRateCallback(BaseCallback):
                     opp = self.opponents[0]
                     if hasattr(opp, "temperature"):
                         epsilon_done = opp.temperature <= end_val + 0.05
-                        if not epsilon_done and self.verbose and not hasattr(self, "_eps_warned"):
-                            print(f"  [Curriculum] temperature still at {opp.temperature:.2f} — phase won't end until {end_val:.2f}")
-                            self._eps_warned = True
+                        if not epsilon_done:
+                            log.debug("Curriculum: temperature=%.2f, need <=%.2f to graduate", opp.temperature, end_val)
+                            if self.verbose and not hasattr(self, "_eps_warned"):
+                                print(
+                                    f"  [Curriculum] temperature still at {opp.temperature:.2f} — phase won't end until {end_val:.2f}"
+                                )
+                                self._eps_warned = True
                     elif hasattr(opp, "epsilon"):
                         epsilon_done = opp.epsilon <= end_val + 0.01
-                        if not epsilon_done and self.verbose and not hasattr(self, "_eps_warned"):
-                            print(f"  [Curriculum] epsilon still at {opp.epsilon:.2f} — phase won't end until {end_val:.2f}")
-                            self._eps_warned = True
+                        if not epsilon_done:
+                            log.debug("Curriculum: epsilon=%.2f, need <=%.2f to graduate", opp.epsilon, end_val)
+                            if self.verbose and not hasattr(self, "_eps_warned"):
+                                print(
+                                    f"  [Curriculum] epsilon still at {opp.epsilon:.2f} — phase won't end until {end_val:.2f}"
+                                )
+                                self._eps_warned = True
 
                 win_rate = float(np.mean([1.0 if r >= 0.5 else 0.0 for r in self._episode_rewards]))
                 if win_rate >= self.stop_at_win_rate and epsilon_done:
                     if not self._target_hit_once:
                         self._target_hit_once = True
+                        log.info(
+                            "Target hit: win_rate=%.3f >= %.3f — confirming next eval", win_rate, self.stop_at_win_rate
+                        )
                         if self.verbose:
-                            print(f"  [Target hit] win rate {win_rate:.3f} >= {self.stop_at_win_rate} at epsilon 0.0 — confirming...")
+                            print(
+                                f"  [Target hit] win rate {win_rate:.3f} >= {self.stop_at_win_rate} at epsilon 0.0 — confirming..."
+                            )
                     else:
+                        log.info(
+                            "Phase complete: win_rate=%.3f >= %.3f at full difficulty — advancing",
+                            win_rate,
+                            self.stop_at_win_rate,
+                        )
                         if self.verbose:
-                            print(f"  [Phase complete] win rate {win_rate:.3f} >= {self.stop_at_win_rate} at full difficulty — advancing")
+                            print(
+                                f"  [Phase complete] win rate {win_rate:.3f} >= {self.stop_at_win_rate} at full difficulty — advancing"
+                            )
                         return False
                 else:
                     self._target_hit_once = False
@@ -239,7 +280,6 @@ class WinRateCallback(BaseCallback):
         action_pct = (self._action_counts / total_actions * 100) if total_actions > 0 else self._action_counts
 
         # Compute voluntary vs forced switch rates
-        total_switches = self._voluntary_switch_count + self._forced_switch_count
         vol_switch_pct = (self._voluntary_switch_count / total_actions * 100) if total_actions > 0 else 0.0
         forced_switch_pct = (self._forced_switch_count / total_actions * 100) if total_actions > 0 else 0.0
 
@@ -259,34 +299,45 @@ class WinRateCallback(BaseCallback):
         # Anneal opponent epsilon based on win rate
         self._maybe_anneal_epsilon(win_rate)
 
+        # Always log eval to file (structured for post-run analysis)
+        label = self.phase_label or "opponent"
+        eps_str = ""
+        if self.opponents:
+            opp = self.opponents[0]
+            if hasattr(opp, "temperature"):
+                eps_str = f" temp={opp.temperature:.2f}"
+            elif hasattr(opp, "epsilon"):
+                eps_str = f" opp_eps={opp.epsilon:.2f}"
+        log.info(
+            "EVAL step=%d vs=%s win_rate=%.3f avg_turns=%.1f vol_switch=%.1f%% forced_switch=%.1f%% episodes=%d%s",
+            self.num_timesteps,
+            label,
+            win_rate,
+            avg_length,
+            vol_switch_pct,
+            forced_switch_pct,
+            n,
+            eps_str,
+        )
+
         if self.verbose:
             bar = "█" * int(win_rate * 20) + "░" * (20 - int(win_rate * 20))
-            label = self.phase_label or "opponent"
-            eps_str = ""
-            if self.opponents:
-                opp = self.opponents[0]
-                if hasattr(opp, "temperature"):
-                    eps_str = f"  temp={opp.temperature:.2f}"
-                elif hasattr(opp, "epsilon"):
-                    eps_str = f"  opp_ε={opp.epsilon:.2f}"
             print(
                 f"  step {self.num_timesteps:>6,} │ "
-                f"vs {label}: {win_rate*100:>5.1f}%  [{bar}]  "
+                f"vs {label}: {win_rate * 100:>5.1f}%  [{bar}]  "
                 f"avg {avg_length:.0f} turns  "
                 f"vol.switch {vol_switch_pct:.0f}%  forced {forced_switch_pct:.0f}%  "
                 f"({n} eps){eps_str}"
             )
 
         # Update frozen self-play opponent periodically
-        if (
-            self.selfplay_path
-            and self._total_episodes - self._last_selfplay_update >= self.selfplay_update_freq
-        ):
+        if self.selfplay_path and self._total_episodes - self._last_selfplay_update >= self.selfplay_update_freq:
             self._last_selfplay_update = self._total_episodes
             self.model.save(self.selfplay_path)
             for opp in self.opponents:
                 if hasattr(opp, "swap_model"):
                     opp.swap_model(self.selfplay_path)
+            log.info("SelfPlay: frozen opponent updated (step %d)", self.num_timesteps)
             if self.verbose:
                 print(f"  [SelfPlay] Frozen opponent updated (step {self.num_timesteps})")
 
@@ -300,6 +351,7 @@ class WinRateCallback(BaseCallback):
             self.model.save(os.path.join(self.save_path, snapshot_name))
             # Latest best (always points to the current best, for easy loading)
             self.model.save(os.path.join(self.save_path, "best_model"))
+            log.info("New best win_rate=%.3f — saved %s", win_rate, snapshot_name)
             if self.verbose:
                 print(f"[WinRate] New best {win_rate:.3f} — saved {snapshot_name}")
 
@@ -338,9 +390,10 @@ class WinRateCallback(BaseCallback):
         for threshold in _WIN_RATE_MILESTONES:
             if win_rate >= threshold and threshold not in self._crossed_milestones:
                 self._crossed_milestones.add(threshold)
+                label_pct = f"{int(threshold * 100)}%"
+                log.info("MILESTONE: win rate crossed %s at step %d", label_pct, self.num_timesteps)
                 if self.verbose:
-                    label = f"{int(threshold * 100)}%"
-                    print(f"  [Milestone] Win rate crossed {label} at step {self.num_timesteps:,}")
+                    print(f"  [Milestone] Win rate crossed {label_pct} at step {self.num_timesteps:,}")
 
     def _maybe_snapshot_replays(self, win_rate: float) -> None:
         """Copy 3 most recent replays to notable/ at milestone steps."""
@@ -367,6 +420,7 @@ class WinRateCallback(BaseCallback):
             dst = self.notable_dir / f"{run_tag}_{phase_tag}_step{step_label}_wr{win_rate:.2f}_{i}.html"
             shutil.copy2(src, dst)
 
+        log.info("Snapped %d replays -> replays/notable/ (step %s, wr=%.3f)", len(replay_files), step_label, win_rate)
         if self.verbose:
             print(
                 f"[MEDIA]  Snapped {len(replay_files)} replays → "
@@ -382,7 +436,7 @@ class WinRateCallback(BaseCallback):
         registry_path = Path(self.save_path) / "checkpoint_registry.json"
         registry = {}
         if registry_path.exists():
-            with open(registry_path, "r") as f:
+            with open(registry_path) as f:
                 registry = json.load(f)
 
         step = self.num_timesteps
@@ -421,8 +475,14 @@ class WinRateCallback(BaseCallback):
                     inner = inner.env
                 if hasattr(inner, "shaping_factor"):
                     inner.shaping_factor = new_factor
-        if self.verbose and self._total_episodes % 200 == 0:
-            print(f"  [Shaping] factor={new_factor:.2f} (battle {self._total_episodes}/{self.shaping_decay_battles})")
+        if self._total_episodes % 200 == 0:
+            log.info(
+                "Shaping: factor=%.2f (battle %d/%d)", new_factor, self._total_episodes, self.shaping_decay_battles
+            )
+            if self.verbose:
+                print(
+                    f"  [Shaping] factor={new_factor:.2f} (battle {self._total_episodes}/{self.shaping_decay_battles})"
+                )
 
     def _maybe_anneal_epsilon(self, win_rate: float) -> None:
         """Set opponent epsilon as a continuous function of win rate.
@@ -453,6 +513,7 @@ class WinRateCallback(BaseCallback):
                 for opp in self.opponents:
                     if hasattr(opp, "temperature"):
                         opp.temperature = new_temp
+                log.info("Curriculum: temperature %.2f -> %.2f (wr500=%.2f)", current_temp, new_temp, eps_win_rate)
                 if self.verbose:
                     print(f"  [Curriculum] temperature: {current_temp:.2f} → {new_temp:.2f} (wr500={eps_win_rate:.2f})")
         elif hasattr(self.opponents[0], "epsilon"):
@@ -465,6 +526,7 @@ class WinRateCallback(BaseCallback):
                 for opp in self.opponents:
                     if hasattr(opp, "epsilon"):
                         opp.epsilon = new_eps
+                log.info("Curriculum: epsilon %.2f -> %.2f (wr500=%.2f)", current_eps, new_eps, eps_win_rate)
                 if self.verbose:
                     print(f"  [Curriculum] epsilon: {current_eps:.2f} → {new_eps:.2f} (wr500={eps_win_rate:.2f})")
 
@@ -482,7 +544,7 @@ class WinRateCallback(BaseCallback):
         header = (
             f"\n## Phase vs {label}\n\n"
             f"Started: {date}  \n"
-            f"Target: {target*100:.0f}% win rate\n\n"
+            f"Target: {target * 100:.0f}% win rate\n\n"
             f"| Step    | Win Rate | Avg Turns | Vol.Switch% | Forced% | Top Move         | Episodes |\n"
             f"|---------|----------|-----------|-------------|---------|------------------|----------|\n"
         )

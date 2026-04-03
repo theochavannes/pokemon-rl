@@ -22,14 +22,19 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 os.chdir(_PROJECT_ROOT)
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+import logging
+
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from src.callbacks import WinRateCallback
 from src.env.gen1_env import make_env
-from src.obs_transfer import load_with_expanded_obs, is_compatible
-from src.run_manager import RunManager, RUNS_DIR
+from src.logging_config import setup_logging
+from src.obs_transfer import is_compatible, load_with_expanded_obs
+from src.run_manager import RUNS_DIR, RunManager
+
+log = logging.getLogger("pokemon_rl.selfplay")
 
 # ---------------------------------------------------------------------------
 # Config
@@ -57,9 +62,7 @@ def _prevent_sleep() -> None:
     ES_CONTINUOUS = 0x80000000
     ES_SYSTEM_REQUIRED = 0x00000001
     ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
-    atexit.register(
-        lambda: ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
-    )
+    atexit.register(lambda: ctypes.windll.kernel32.SetThreadExecutionState(0x80000000))
     print("Sleep prevention: ON")
 
 
@@ -129,6 +132,9 @@ def main(run_id: str | None = None, new_run: bool = False) -> None:
     os.makedirs(run.models_dir, exist_ok=True)
     os.makedirs(run.logs_dir, exist_ok=True)
 
+    setup_logging(log_dir=run.logs_dir)
+    log.info("Starting %s (self-play training)", run.run_id)
+
     seed_path = _find_seed(run)
     frozen_path = str(Path(run.models_dir) / "selfplay_frozen_opponent")
 
@@ -159,7 +165,8 @@ def main(run_id: str | None = None, new_run: bool = False) -> None:
     current_obs_dim = env.observation_space.shape[0]
     if is_compatible(seed_path, current_obs_dim):
         model = MaskablePPO.load(
-            seed_path, env=env,
+            seed_path,
+            env=env,
             **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
         )
     else:

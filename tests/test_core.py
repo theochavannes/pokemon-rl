@@ -6,14 +6,14 @@ Requires: pokemon_rl conda env (poke-env, sb3-contrib, torch)
 Does NOT require a running Showdown server (all tests use mocks).
 """
 
-import math
-import numpy as np
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-from types import SimpleNamespace
-
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import numpy as np
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
@@ -21,8 +21,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Helpers to build mock battle objects
 # ---------------------------------------------------------------------------
 
-def _mock_move(base_power=80, type_value=10, current_pp=15, max_pp=15,
-               accuracy=True, effectiveness=2.0):
+
+def _mock_move(base_power=80, type_value=10, current_pp=15, max_pp=15, accuracy=True, effectiveness=2.0):
     """Create a mock Move object."""
     move = MagicMock()
     move.base_power = base_power
@@ -35,9 +35,17 @@ def _mock_move(base_power=80, type_value=10, current_pp=15, max_pp=15,
     return move
 
 
-def _mock_pokemon(hp_fraction=1.0, fainted=False, status=None,
-                  boosts=None, type1_value=10, type2_value=0,
-                  level=100, base_stats=None, moves=None):
+def _mock_pokemon(
+    hp_fraction=1.0,
+    fainted=False,
+    status=None,
+    boosts=None,
+    type1_value=10,
+    type2_value=0,
+    level=100,
+    base_stats=None,
+    moves=None,
+):
     """Create a mock Pokemon object."""
     mon = MagicMock()
     mon.current_hp_fraction = hp_fraction
@@ -63,8 +71,7 @@ def _mock_pokemon(hp_fraction=1.0, fainted=False, status=None,
     return mon
 
 
-def _mock_battle(own_hp=1.0, opp_hp=0.8, team_size=6, opp_team_size=3,
-                 trapped=False, maybe_trapped=False):
+def _mock_battle(own_hp=1.0, opp_hp=0.8, team_size=6, opp_team_size=3, trapped=False, maybe_trapped=False):
     """Create a mock Battle with configurable team."""
     battle = MagicMock()
 
@@ -98,33 +105,39 @@ def _mock_battle(own_hp=1.0, opp_hp=0.8, team_size=6, opp_team_size=3,
 # Test embed_battle
 # ---------------------------------------------------------------------------
 
+
 class TestEmbedBattle:
     def test_output_shape(self):
         from src.env.gen1_env import embed_battle
+
         battle = _mock_battle()
         obs = embed_battle(battle)
         assert obs.shape == (421,), f"Expected (421,), got {obs.shape}"
 
     def test_output_dtype(self):
         from src.env.gen1_env import embed_battle
+
         battle = _mock_battle()
         obs = embed_battle(battle)
         assert obs.dtype == np.float32
 
     def test_no_nan_inf(self):
         from src.env.gen1_env import embed_battle
+
         battle = _mock_battle()
         obs = embed_battle(battle)
         assert np.all(np.isfinite(obs)), "Obs contains NaN or Inf"
 
     def test_own_hp_encoded(self):
         from src.env.gen1_env import embed_battle
+
         battle = _mock_battle(own_hp=0.75)
         obs = embed_battle(battle)
         assert abs(obs[0] - 0.75) < 1e-5, f"Own HP should be 0.75, got {obs[0]}"
 
     def test_trapping_flags(self):
         from src.env.gen1_env import embed_battle
+
         battle = _mock_battle(trapped=True, maybe_trapped=True)
         obs = embed_battle(battle)
         assert obs[-2] == 1.0, "trapped flag should be 1.0"
@@ -132,6 +145,7 @@ class TestEmbedBattle:
 
     def test_empty_opp_bench_padding(self):
         from src.env.gen1_env import embed_battle
+
         battle = _mock_battle(opp_team_size=0)
         obs = embed_battle(battle)
         # With 0 revealed opponents, all 6 opp bench slots should be padded
@@ -145,6 +159,7 @@ class TestEmbedBattle:
     def test_no_moves_pokemon(self):
         """Pokemon with no moves should produce zero-padded move features."""
         from src.env.gen1_env import embed_battle
+
         battle = _mock_battle()
         # Set own active to have 0 moves
         battle.active_pokemon.moves = {}
@@ -157,6 +172,7 @@ class TestEmbedBattle:
     def test_various_team_sizes(self):
         """Test with different team sizes to make sure padding works."""
         from src.env.gen1_env import embed_battle
+
         for team_size in [1, 3, 6]:
             for opp_size in [0, 2, 6]:
                 battle = _mock_battle(team_size=team_size, opp_team_size=opp_size)
@@ -169,15 +185,18 @@ class TestEmbedBattle:
 # Test _expected_damage
 # ---------------------------------------------------------------------------
 
+
 class TestExpectedDamage:
     def test_zero_base_power(self):
         from src.agents.heuristic_agent import _expected_damage
+
         move = _mock_move(base_power=0)
         opp = _mock_pokemon()
         assert _expected_damage(move, opp) == 0.0
 
     def test_normal_damage(self):
         from src.agents.heuristic_agent import _expected_damage
+
         move = _mock_move(base_power=100, effectiveness=2.0)
         opp = _mock_pokemon()
         move.type.damage_multiplier.return_value = 2.0
@@ -185,6 +204,7 @@ class TestExpectedDamage:
 
     def test_immune_matchup(self):
         from src.agents.heuristic_agent import _expected_damage
+
         move = _mock_move(base_power=100, effectiveness=0.0)
         opp = _mock_pokemon()
         move.type.damage_multiplier.return_value = 0.0
@@ -192,6 +212,7 @@ class TestExpectedDamage:
 
     def test_exception_handling(self):
         from src.agents.heuristic_agent import _expected_damage
+
         move = _mock_move(base_power=100)
         opp = _mock_pokemon()
         move.type.damage_multiplier.side_effect = Exception("type error")
@@ -203,10 +224,11 @@ class TestExpectedDamage:
 # Test SoftmaxDamagePlayer
 # ---------------------------------------------------------------------------
 
+
 class TestSoftmaxDamagePlayer:
     def test_low_temperature_favors_strong_moves(self):
         """At very low temperature, should almost always pick the strongest move."""
-        from src.agents.heuristic_agent import SoftmaxDamagePlayer, _expected_damage
+        from src.agents.heuristic_agent import SoftmaxDamagePlayer
 
         player = SoftmaxDamagePlayer.__new__(SoftmaxDamagePlayer)
         player.temperature = 0.01
@@ -262,13 +284,14 @@ class TestSoftmaxDamagePlayer:
             if id(m) in counts:
                 counts[id(m)] += 1
 
-        for move, count in zip(moves, counts.values()):
+        for move, count in zip(moves, counts.values(), strict=False):
             assert count > 30, f"Move with bp={move.base_power} chosen only {count}/300 times at high temp"
 
 
 # ---------------------------------------------------------------------------
 # Test _EpsilonMixin
 # ---------------------------------------------------------------------------
+
 
 class TestEpsilonMixin:
     def test_epsilon_blend(self):
@@ -297,7 +320,7 @@ class TestEpsilonMixin:
 
     def test_zero_epsilon_uses_heuristic(self):
         """With epsilon=0.0, should always use the base heuristic."""
-        from src.agents.heuristic_agent import EpsilonMaxDamagePlayer, _expected_damage
+        from src.agents.heuristic_agent import EpsilonMaxDamagePlayer
 
         player = EpsilonMaxDamagePlayer.__new__(EpsilonMaxDamagePlayer)
         player.epsilon = 0.0
@@ -324,6 +347,7 @@ class TestEpsilonMixin:
 # Test obs_transfer
 # ---------------------------------------------------------------------------
 
+
 def _make_dummy_vec_env(obs_dim, n_actions=4):
     """Create a DummyVecEnv with a simple gymnasium env for testing."""
     import gymnasium
@@ -348,8 +372,9 @@ def _make_dummy_vec_env(obs_dim, n_actions=4):
 class TestObsTransfer:
     def test_is_compatible_same_dim(self, tmp_path):
         """Compatible when obs dims match."""
-        from src.obs_transfer import is_compatible
         from sb3_contrib import MaskablePPO
+
+        from src.obs_transfer import is_compatible
 
         env = _make_dummy_vec_env(10)
         model = MaskablePPO("MlpPolicy", env, verbose=0)
@@ -361,8 +386,9 @@ class TestObsTransfer:
 
     def test_expand_preserves_old_weights(self, tmp_path):
         """Weight expansion should preserve old feature weights and zero-pad new ones."""
-        from src.obs_transfer import load_with_expanded_obs
         from sb3_contrib import MaskablePPO
+
+        from src.obs_transfer import load_with_expanded_obs
 
         old_dim = 10
         new_dim = 15
@@ -376,7 +402,7 @@ class TestObsTransfer:
         # Get old first-layer weights
         old_sd = old_model.policy.state_dict()
         old_first_layer = None
-        for key, param in old_sd.items():
+        for _key, param in old_sd.items():
             if param.ndim == 2 and param.shape[1] == old_dim:
                 old_first_layer = param.clone()
                 break
@@ -395,16 +421,16 @@ class TestObsTransfer:
         for key, param in new_sd.items():
             if param.ndim == 2 and param.shape[1] == new_dim:
                 import torch
-                assert torch.allclose(param[:, :old_dim], old_first_layer), \
-                    f"Old weights not preserved in {key}"
-                assert torch.all(param[:, old_dim:] == 0), \
-                    f"New columns not zero in {key}"
+
+                assert torch.allclose(param[:, :old_dim], old_first_layer), f"Old weights not preserved in {key}"
+                assert torch.all(param[:, old_dim:] == 0), f"New columns not zero in {key}"
                 break
 
 
 # ---------------------------------------------------------------------------
 # Test reward shaping decay
 # ---------------------------------------------------------------------------
+
 
 def _make_decay_callback(gen1_env, total_episodes, decay_battles=1000):
     """Build a WinRateCallback with mocked wrapper chain for shaping decay tests."""
@@ -451,6 +477,7 @@ class TestRewardShapingDecay:
 # Integration smoke test (no Showdown server needed for shape verification)
 # ---------------------------------------------------------------------------
 
+
 class TestIntegrationSmoke:
     def test_embed_battle_with_varied_inputs(self):
         """Smoke test: embed_battle handles edge cases without crashing."""
@@ -490,8 +517,8 @@ class TestIntegrationSmoke:
 
     def test_status_encoding(self):
         """Verify all status conditions map to expected values."""
-        from src.env.gen1_env import _status, _STATUS_TO_FLOAT
-        from poke_env.battle.status import Status
+
+        from src.env.gen1_env import _STATUS_TO_FLOAT, _status
 
         mon = _mock_pokemon()
         for status_val, expected_float in _STATUS_TO_FLOAT.items():

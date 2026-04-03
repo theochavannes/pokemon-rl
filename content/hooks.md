@@ -107,7 +107,7 @@ After the 10-agent audit found 5 bugs (including the dead temperature annealing)
 **What changed:**
 - Replaced Pylint with Ruff (10-100x faster, catches more)
 - Added pre-commit hooks (auto-format, block large files — critical when one `git add .` could commit a 200MB model)
-- Modern CI pipeline (lint + test in parallel on every PR)
+- Modern CI pipeline (lint then test on every PR)
 - CodeRabbit AI code review (caught 5 issues on the first PR it reviewed)
 - Dependabot for automatic security updates
 - Claude Code hooks (every AI edit gets auto-formatted)

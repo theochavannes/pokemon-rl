@@ -135,11 +135,12 @@ Added 23 unit tests covering: `embed_battle` shape/dtype/values, `_expected_dama
 Removed all replay HTML files from tracking (10 files, ~150KB). Expanded `.gitignore` to cover: IDE files (`.idea/`, `.vscode/`), model checkpoints (`*.pt`, `*.pth`, `*.zip`), pytest cache, W&B tracking dirs, all of `runs/`, and meta-prompts. Previously only `runs/*/models/logs/replays/` were ignored — run metadata (`run_info.json`, `training_log.md`) was leaking into `git status`.
 
 ### Tooling Decisions
+
 | Tool | Replaces | Why |
 |------|----------|-----|
 | **Ruff** | Pylint + Black + isort + Flake8 | Single tool, 10-100x faster, more rules, auto-fix |
 | **Pre-commit hooks** | Nothing (had none) | Block bad commits before they enter history |
-| **GitHub Actions CI** | pylint.yml (lint only) | Lint + test in parallel, pip caching, proper Ruff action |
+| **GitHub Actions CI** | pylint.yml (lint only) | Lint then test (sequential), pip caching, proper Ruff action |
 | **CodeRabbit** | No code review | AI reviewer on every PR, free for public repos |
 | **Dependabot** | Manual dep updates | Auto-PRs for security vulnerabilities |
 | **Claude Code hooks** | CLAUDE.md formatting instructions | Deterministic auto-format on every AI edit |
@@ -160,6 +161,7 @@ Removed all replay HTML files from tracking (10 files, ~150KB). Expanded `.gitig
 Zero Python logging — everything was bare `print()`. No log files written to disk. If the terminal closed during a run, all training output was lost. poke-env's internal logger emitted per-Pokemon warnings (e.g. about Vaporeon) hundreds of times per run, polluting the console.
 
 ### Solution
+
 | Component | Before | After |
 |-----------|--------|-------|
 | **Console output** | `print()` only | `print()` + `logging.Logger` (dual output) |

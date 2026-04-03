@@ -198,7 +198,7 @@ claude mcp add sequential-thinking -- npx -y @modelcontextprotocol/server-sequen
 Create `.claude/commands/` directory with useful shortcuts:
 
 ### `.claude/commands/train.md`
-```
+```text
 Start the Showdown server in the background, then run training with the specified arguments.
 1. cd showdown && node pokemon-showdown start --no-security &
 2. Wait 3 seconds for server startup
@@ -206,7 +206,7 @@ Start the Showdown server in the background, then run training with the specifie
 ```
 
 ### `.claude/commands/benchmark.md`
-```
+```text
 Run the heuristic benchmark suite.
 1. Ensure Showdown server is running (cd showdown && node pokemon-showdown start --no-security &)
 2. Run: python scripts/benchmark_heuristic.py

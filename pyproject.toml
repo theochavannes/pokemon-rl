@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "pokemon-rl"
 version = "0.1.0"
@@ -26,11 +30,15 @@ target-version = "py311"
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "S"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"src/train.py" = ["E402"]
+"src/selfplay_train.py" = ["E402"]
+"src/agents/*" = ["S311"]
+"src/env/*" = ["S101", "S311"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

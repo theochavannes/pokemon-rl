@@ -14,8 +14,8 @@ Usage:
 """
 
 import numpy as np
-from poke_env.player.player import Player
 from poke_env.environment.singles_env import SinglesEnv
+from poke_env.player.player import Player
 
 
 class FrozenPolicyPlayer(Player):
@@ -33,6 +33,7 @@ class FrozenPolicyPlayer(Player):
 
     def _load_model(self, path: str) -> None:
         from sb3_contrib import MaskablePPO
+
         self.model = MaskablePPO.load(path)
 
     def swap_model(self, new_path: str) -> None:
@@ -42,6 +43,7 @@ class FrozenPolicyPlayer(Player):
 
     def choose_move(self, battle):
         from src.env.gen1_env import embed_battle
+
         obs = embed_battle(battle)
         mask = np.array(SinglesEnv.get_action_mask(battle), dtype=bool)
         action, _ = self.model.predict(obs, action_masks=mask, deterministic=True)

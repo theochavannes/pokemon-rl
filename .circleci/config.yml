@@ -43,8 +43,7 @@ jobs:
       - run:
           name: Install dependencies
           command: |
-            pip install -e ".[dev]"
-            pip install torch --index-url https://download.pytorch.org/whl/cpu
+            pip install --extra-index-url https://download.pytorch.org/whl/cpu -e ".[dev]"
       - save_cache:
           key: pip-{{ checksum "pyproject.toml" }}
           paths:

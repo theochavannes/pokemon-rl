@@ -17,13 +17,13 @@ Env stack for training:
     DummyVecEnv / SubprocVecEnv
 """
 
-import numpy as np
 import gymnasium
+import numpy as np
 from gymnasium.spaces import Box
 from poke_env.battle.status import Status
 from poke_env.data import GenData
-from poke_env.environment.singles_env import SinglesEnv
 from poke_env.environment.single_agent_wrapper import SingleAgentWrapper
+from poke_env.environment.singles_env import SinglesEnv
 from poke_env.ps_client.account_configuration import AccountConfiguration
 
 _GEN1_TYPE_CHART = GenData.from_gen(1).type_chart
@@ -65,15 +65,10 @@ def _move_features(move, opponent) -> list:
     base_power = move.base_power / 150.0
     type_index = move.type.value / 18.0
 
-    if move.max_pp and move.max_pp > 0:
-        pp_fraction = move.current_pp / move.max_pp
-    else:
-        pp_fraction = 0.0
+    pp_fraction = move.current_pp / move.max_pp if move.max_pp and move.max_pp > 0 else 0.0
 
     try:
-        effectiveness = move.type.damage_multiplier(
-            opponent.type_1, opponent.type_2, type_chart=_GEN1_TYPE_CHART
-        ) / 4.0
+        effectiveness = move.type.damage_multiplier(opponent.type_1, opponent.type_2, type_chart=_GEN1_TYPE_CHART) / 4.0
     except Exception:
         effectiveness = 0.25
 
@@ -157,7 +152,7 @@ def embed_battle(battle) -> np.ndarray:
     obs.append(_boost(own.boosts, "accuracy"))
     obs.append(_boost(own.boosts, "evasion"))
     obs.append(_status(own))
-    obs.append(1.0)                            # is_active placeholder
+    obs.append(1.0)  # is_active placeholder
     obs.append(1.0 if own.fainted else 0.0)
     obs.extend(_types(own))
     obs.extend(_base_stats(own))
@@ -214,9 +209,9 @@ def embed_battle(battle) -> np.ndarray:
             mon = opp_team[i]
             obs.append(_hp(mon))
             obs.append(1.0 if mon.fainted else 0.0)
-            obs.append(1.0)                    # revealed = True
+            obs.append(1.0)  # revealed = True
             obs.extend(_types(mon))
-            obs.extend(_base_stats(mon))       # atk, def, spa, spe (4 dims)
+            obs.extend(_base_stats(mon))  # atk, def, spa, spe (4 dims)
             # Revealed moves (only moves we've seen this opponent use)
             opp_bench_moves = list(mon.moves.values())[:4]
             for move in opp_bench_moves:
@@ -268,9 +263,7 @@ class Gen1Env(SinglesEnv):
         self.shaping_factor = shaping_factor
         # PokeEnv.__init__ does not set observation_spaces — must be set by subclass.
         # __setattr__ intercepts this and wraps each value in Dict(observation, action_mask).
-        self.observation_spaces = {
-            agent: self.describe_embedding() for agent in self.possible_agents
-        }
+        self.observation_spaces = {agent: self.describe_embedding() for agent in self.possible_agents}
 
     def calc_reward(self, battle) -> float:
         return self.reward_computing_helper(
@@ -331,7 +324,7 @@ def make_env(
     shaping_factor: float = 1.0,
     opponent_difficulty: float = 0.8,
     selfplay_model_path: str | None = None,
-) -> "Monitor":
+):
     """
     Factory for a single SB3-compatible Gen 1 environment.
 
@@ -354,6 +347,7 @@ def make_env(
     """
     import random
     import string
+
     from stable_baselines3.common.monitor import Monitor
 
     suffix = "".join(random.choices(string.ascii_lowercase, k=6))
@@ -362,81 +356,92 @@ def make_env(
         account_configuration1=AccountConfiguration(f"PPOAgent{env_index}{suffix}", None),
         account_configuration2=AccountConfiguration(f"RandOpp{env_index}{suffix}", None),
         battle_format=battle_format,
-        log_level=25,
+        log_level=40,
         save_replays=save_replays,
     )
 
     if opponent_type == "random_attacker":
         from src.agents.heuristic_agent import RandomAttackerPlayer
+
         opponent = RandomAttackerPlayer(
             battle_format=battle_format,
             account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
             start_listening=False,
-            log_level=25,
+            log_level=40,
         )
     elif opponent_type == "random":
         from poke_env.player.baselines import RandomPlayer as _RP
+
         opponent = _RP(
             battle_format=battle_format,
             account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
             start_listening=False,
-            log_level=25,
+            log_level=40,
         )
     elif opponent_type == "softmax_damage":
         from src.agents.heuristic_agent import SoftmaxDamagePlayer
+
         opponent = SoftmaxDamagePlayer(
             temperature=opponent_difficulty,
             battle_format=battle_format,
             account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
             start_listening=False,
-            log_level=25,
+            log_level=40,
         )
     elif opponent_type == "epsilon_maxdamage":
         from src.agents.heuristic_agent import EpsilonMaxDamagePlayer
+
         opponent = EpsilonMaxDamagePlayer(
             epsilon=opponent_difficulty,
             battle_format=battle_format,
             account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
             start_listening=False,
-            log_level=25,
+            log_level=40,
         )
     elif opponent_type == "maxdamage":
         from src.agents.heuristic_agent import MaxDamagePlayer
+
         opponent = MaxDamagePlayer(
             battle_format=battle_format,
             account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
             start_listening=False,
-            log_level=25,
+            log_level=40,
         )
     elif opponent_type == "typematchup":
         from src.agents.heuristic_agent import TypeMatchupPlayer
+
         opponent = TypeMatchupPlayer(
             battle_format=battle_format,
             account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
             start_listening=False,
-            log_level=25,
+            log_level=40,
         )
     elif opponent_type == "stall":
         from src.agents.heuristic_agent import StallPlayer
+
         opponent = StallPlayer(
             battle_format=battle_format,
             account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
             start_listening=False,
-            log_level=25,
+            log_level=40,
         )
     elif opponent_type == "aggressive_switcher":
         from src.agents.heuristic_agent import AggressiveSwitcher
+
         opponent = AggressiveSwitcher(
             battle_format=battle_format,
             account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
             start_listening=False,
-            log_level=25,
+            log_level=40,
         )
     elif opponent_type == "mixed":
         from src.agents.heuristic_agent import (
-            EpsilonMaxDamagePlayer, EpsilonTypeMatchupPlayer,
-            EpsilonStallPlayer, EpsilonAggressiveSwitcher,
+            EpsilonAggressiveSwitcher,
+            EpsilonMaxDamagePlayer,
+            EpsilonStallPlayer,
+            EpsilonTypeMatchupPlayer,
         )
+
         _HEURISTIC_POOL = [
             EpsilonMaxDamagePlayer,
             EpsilonTypeMatchupPlayer,
@@ -446,12 +451,13 @@ def make_env(
         # If selfplay model provided, last env slot uses frozen self-play
         if selfplay_model_path and env_index == 3:
             from src.agents.policy_player import FrozenPolicyPlayer
+
             opponent = FrozenPolicyPlayer(
                 model_path=selfplay_model_path,
                 battle_format=battle_format,
                 account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
                 start_listening=False,
-                log_level=25,
+                log_level=40,
             )
         else:
             cls = _HEURISTIC_POOL[env_index % len(_HEURISTIC_POOL)]
@@ -460,18 +466,19 @@ def make_env(
                 battle_format=battle_format,
                 account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
                 start_listening=False,
-                log_level=25,
+                log_level=40,
             )
     elif opponent_type == "policy":
         if opponent_model_path is None:
             raise ValueError("opponent_model_path required for opponent_type='policy'")
         from src.agents.policy_player import FrozenPolicyPlayer
+
         opponent = FrozenPolicyPlayer(
             model_path=opponent_model_path,
             battle_format=battle_format,
             account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
             start_listening=False,
-            log_level=25,
+            log_level=40,
         )
     else:
         raise ValueError(f"Unknown opponent_type: {opponent_type!r}")
