@@ -124,6 +124,14 @@ class WinRateCallback(BaseCallback):
         self._last_heartbeat_step: int = 0
         self._heartbeat_freq: int = 2048  # print a heartbeat every rollout
 
+        # Move quality tracking
+        self._best_move_picks: int = 0  # times agent picked highest-damage move
+        self._move_decisions: int = 0  # total move decisions (excludes switches)
+        self._damage_efficiency_sum: float = 0.0  # sum of (chosen_dmg / best_dmg)
+        self._opp_fainted_total: int = 0  # total opponent Pokemon fainted
+        self._own_fainted_total: int = 0  # total own Pokemon fainted
+        self._fainted_episode_count: int = 0  # episodes counted for faint stats
+
     def _on_training_start(self) -> None:
         self.content_log.parent.mkdir(parents=True, exist_ok=True)
         self._write_content_log_header()
@@ -133,6 +141,22 @@ class WinRateCallback(BaseCallback):
             print(f"  Training started — collecting rollouts vs {label}...")
             print("  (first battles will print individually)\n")
 
+    @staticmethod
+    def _move_damages_from_obs(obs: np.ndarray) -> np.ndarray:
+        """Extract expected damage proxy for each of 4 moves from the observation.
+
+        Own moves start at index 16, with 5 features per move:
+          [base_power, type_index, pp_fraction, effectiveness, accuracy]
+        Expected damage proxy = base_power * effectiveness * 4.0  (undo normalization)
+        """
+        damages = np.zeros(4)
+        for i in range(4):
+            base = 16 + i * 5
+            bp = obs[base]  # base_power / 150
+            eff = obs[base + 3]  # effectiveness / 4
+            damages[i] = bp * eff * 4.0  # rough damage proxy
+        return damages
+
     def _on_step(self) -> bool:
         # Track action distribution + forced vs voluntary switches
         actions = self.locals.get("actions")
@@ -140,6 +164,13 @@ class WinRateCallback(BaseCallback):
             # Use pre-step masks from MaskablePPO's rollout (the masks that were
             # active when the action was chosen), NOT the post-step env masks.
             action_masks = self.locals.get("action_masks")
+            observations = self.locals.get("obs_tensor")
+            # Convert obs to numpy if it's a tensor
+            if observations is not None and hasattr(observations, "cpu"):
+                obs_np = observations.cpu().numpy()
+            else:
+                obs_np = observations
+
             for idx, a in enumerate(np.array(actions).flatten()):
                 if 0 <= a < 10:
                     self._action_counts[a] += 1
@@ -153,6 +184,17 @@ class WinRateCallback(BaseCallback):
                                 self._forced_switch_count += 1
                         else:
                             self._voluntary_switch_count += 1  # assume voluntary if no mask info
+                    elif a >= 6 and obs_np is not None and idx < len(obs_np):
+                        # Track move quality for move actions (6-9)
+                        damages = self._move_damages_from_obs(obs_np[idx])
+                        move_idx = a - 6  # 0-3
+                        chosen_dmg = damages[move_idx]
+                        best_dmg = damages.max()
+                        if best_dmg > 0:
+                            self._move_decisions += 1
+                            self._damage_efficiency_sum += chosen_dmg / best_dmg
+                            if move_idx == int(np.argmax(damages)):
+                                self._best_move_picks += 1
 
         # Track episode outcomes
         for info in self.locals.get("infos", []):
@@ -268,6 +310,14 @@ class WinRateCallback(BaseCallback):
         vol_switch_pct = (self._voluntary_switch_count / total_actions * 100) if total_actions > 0 else 0.0
         forced_switch_pct = (self._forced_switch_count / total_actions * 100) if total_actions > 0 else 0.0
 
+        # Move quality metrics
+        best_move_rate = (self._best_move_picks / self._move_decisions * 100) if self._move_decisions > 0 else 0.0
+        dmg_efficiency = (self._damage_efficiency_sum / self._move_decisions) if self._move_decisions > 0 else 0.0
+
+        # Mean episode return and variance
+        mean_return = float(np.mean(list(self._episode_rewards))) if self._episode_rewards else 0.0
+        return_std = float(np.std(list(self._episode_rewards))) if len(self._episode_rewards) > 1 else 0.0
+
         # TensorBoard only — exclude stdout/log/json/csv on each record() call
         _tb_only = ("stdout", "log", "json", "csv")
         self.logger.record("train/win_rate", win_rate, exclude=_tb_only)
@@ -276,6 +326,10 @@ class WinRateCallback(BaseCallback):
         self.logger.record("train/voluntary_switch_pct", vol_switch_pct, exclude=_tb_only)
         self.logger.record("train/forced_switch_pct", forced_switch_pct, exclude=_tb_only)
         self.logger.record("train/move_rate_pct", float(action_pct[6:].sum()), exclude=_tb_only)
+        self.logger.record("train/best_move_rate", best_move_rate, exclude=_tb_only)
+        self.logger.record("train/damage_efficiency", dmg_efficiency, exclude=_tb_only)
+        self.logger.record("train/mean_episode_return", mean_return, exclude=_tb_only)
+        self.logger.record("train/return_std", return_std, exclude=_tb_only)
         self.logger.dump(self.num_timesteps)
 
         # Decay reward shaping based on total battles
@@ -294,11 +348,14 @@ class WinRateCallback(BaseCallback):
             elif hasattr(opp, "epsilon"):
                 eps_str = f" opp_eps={opp.epsilon:.2f}"
         log.info(
-            "EVAL step=%d vs=%s win_rate=%.3f avg_turns=%.1f vol_switch=%.1f%% forced_switch=%.1f%% episodes=%d%s",
+            "EVAL step=%d vs=%s win_rate=%.3f avg_turns=%.1f best_move=%.1f%% dmg_eff=%.2f"
+            " vol_switch=%.1f%% forced_switch=%.1f%% episodes=%d%s",
             self.num_timesteps,
             label,
             win_rate,
             avg_length,
+            best_move_rate,
+            dmg_efficiency,
             vol_switch_pct,
             forced_switch_pct,
             n,
@@ -311,7 +368,8 @@ class WinRateCallback(BaseCallback):
                 f"  step {self.num_timesteps:>6,} │ "
                 f"vs {label}: {win_rate * 100:>5.1f}%  [{bar}]  "
                 f"avg {avg_length:.0f} turns  "
-                f"vol.switch {vol_switch_pct:.0f}%  forced {forced_switch_pct:.0f}%  "
+                f"bestmv {best_move_rate:.0f}%  dmgeff {dmg_efficiency:.2f}  "
+                f"vol.sw {vol_switch_pct:.0f}%  forced {forced_switch_pct:.0f}%  "
                 f"({n} eps){eps_str}"
             )
 
@@ -349,11 +407,15 @@ class WinRateCallback(BaseCallback):
         self._write_checkpoint_metadata(win_rate, avg_length)
 
         # Content logging
-        self._update_content_log(win_rate, avg_length, action_pct, n, vol_switch_pct, forced_switch_pct)
+        self._update_content_log(
+            win_rate, avg_length, action_pct, n, vol_switch_pct, forced_switch_pct, best_move_rate, dmg_efficiency
+        )
         self._check_win_rate_milestones(win_rate, avg_length, action_pct)
         self._maybe_snapshot_replays(win_rate)
 
-    def _update_content_log(self, win_rate, avg_length, action_pct, n, vol_switch_pct, forced_switch_pct) -> None:
+    def _update_content_log(
+        self, win_rate, avg_length, action_pct, n, vol_switch_pct, forced_switch_pct, best_move_rate, dmg_efficiency
+    ) -> None:
         """Append a row to content/training_log.md."""
         top_move = int(np.argmax(self._action_counts[6:])) + 1  # 1-indexed
         top_move_pct = action_pct[6 + np.argmax(self._action_counts[6:])]
@@ -362,6 +424,8 @@ class WinRateCallback(BaseCallback):
             f"| {self.num_timesteps:>7} "
             f"| {win_rate:.3f} "
             f"| {avg_length:>5.1f} "
+            f"| {best_move_rate:>5.1f}% "
+            f"| {dmg_efficiency:>5.2f} "
             f"| {vol_switch_pct:>5.1f}% "
             f"| {forced_switch_pct:>5.1f}% "
             f"| move_{top_move} ({top_move_pct:.1f}%) "
@@ -530,8 +594,8 @@ class WinRateCallback(BaseCallback):
             f"\n## Phase vs {label}\n\n"
             f"Started: {date}  \n"
             f"Target: {target * 100:.0f}% win rate\n\n"
-            f"| Step    | Win Rate | Avg Turns | Vol.Switch% | Forced% | Top Move         | Episodes |\n"
-            f"|---------|----------|-----------|-------------|---------|------------------|----------|\n"
+            f"| Step    | Win Rate | Avg Turns | BestMv% | DmgEff | Vol.Sw% | Forced% | Top Move         | Episodes |\n"
+            f"|---------|----------|-----------|---------|--------|---------|---------|------------------|----------|\n"
         )
         mode = "a" if self.content_log.exists() else "w"
         with open(self.content_log, mode, encoding="utf-8") as f:
