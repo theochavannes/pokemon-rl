@@ -377,8 +377,7 @@ class WinRateCallback(BaseCallback):
             self.logger.record("train/desync_rate_pct", desync_rate, exclude=_tb_only)
         self.logger.dump(self.num_timesteps)
 
-        # Decay reward shaping based on total battles
-        self._decay_shaping()
+        # Shaping decay disabled — Gen1Env.calc_reward() no longer uses shaping_factor
 
         # Anneal opponent epsilon based on win rate
         self._maybe_anneal_epsilon(win_rate)
