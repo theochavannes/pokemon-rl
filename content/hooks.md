@@ -351,3 +351,14 @@ The obs space went from 928 to 1222 dimensions. But it's not about the numbers �
 **Visual:** Before/after comparison of Thunder Wave's observation vector. Before: [0, 0.72, 0.43, 0, 1.0, 1.0, 0.8, 0, 0, 0, 0, 0, 0, 0]. After: [0, 0.72, 0.43, 0, 1.0, 0, 0, 0.8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0/1]. The zeros that used to make it look useless now carry meaning.
 
 **Why it matters for the video:** This is the "giving the AI eyes" moment. All the previous training failures weren't because the AI was stupid — it was because it was playing blind. Now it can see the full game.
+
+### The Split Brain (Sprint 6)
+**Hook:** "We split the AI's brain in two — one half thinks about its team, the other half thinks about the opponent."
+
+Before: a flat 1222→256→128 network. Every neuron processes all 1222 features at once — your own HP, the opponent's moves, whether Reflect is up, all mixed together. The network has to learn what to pay attention to from scratch.
+
+After: a two-tower architecture. One tower processes your own team info (606 dims), the other processes opponent info (601 dims). Each tower compresses independently to 128 features. Then a merge layer combines them with 15 global features to make decisions.
+
+**Why it's better:** The network no longer has to learn that "my HP" and "their HP" are fundamentally different kinds of information. Each tower specializes — the own-tower learns "what can I do?" and the opp-tower learns "what are they doing?" The merge layer learns "given what I can do and what they're doing, what should I pick?"
+
+**Visual:** Network diagram — before (single funnel 1222→256→128) vs after (two funnels merging). Show the total parameter count: ~300K → ~500K. "Same game, split brain."

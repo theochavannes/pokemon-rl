@@ -210,12 +210,19 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-3)
     args = parser.parse_args()
 
+    from src.env.feature_extractor import PokemonFeatureExtractor
+
     train_bc(
         data_path=args.data,
         output_path=args.output,
         epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
+        policy_kwargs=dict(
+            features_extractor_class=PokemonFeatureExtractor,
+            features_extractor_kwargs=dict(features_dim=256),
+            net_arch=dict(pi=[128], vf=[128]),
+        ),
     )
 
 
