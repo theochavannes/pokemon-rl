@@ -284,3 +284,29 @@ First mixed_league run (run_036): 25% win rate, 9-turn average, 0% voluntary swi
 - Does Vol.Switch% start increasing? (TypeMatchup forcing switching decisions)
 - Does the agent beat all heuristics at >50% within 500K steps?
 - Does the self-play opponent matter, or does the agent just learn from heuristics?
+
+---
+
+## Act 7: The Switching Problem (2026-04-03)
+
+### PPO Cannot Learn Switching
+**Hook:** "We spent 200,000 steps trying to teach an AI to switch Pokemon. It never switched once."
+
+After fixing the forfeit bug, the mixed league ran properly — real games, 27-turn averages, all opponents active. But across two full runs (run_037 and run_038), voluntary switch rate stayed at exactly 0.0%. The agent NEVER voluntarily switched a single time.
+
+**Why:** The BC warm-start was trained on MaxDamagePlayer, which never switches. The agent inherited a -1.37 logit bias against switching. We tried:
+- Halving the bias (-1.37 → -0.69): no effect
+- clip_range 0.1 (conservative): biases literally didn't move in 68K steps
+- clip_range 0.2 (standard): biases drifted but BestMv% eroded without gaining switching
+
+**The deeper problem:** Switching produces ZERO immediate reward. The reward function gives +0.5 for KOs and +1.0 for winning. When you switch to resist a hit, the reward that turn is 0.0. The benefit shows up 3-10 turns later when you eventually KO. No RL algorithm can learn a behavior that produces no measurable signal.
+
+### The Realization
+**Hook:** "You can't learn a skill no one ever showed you."
+
+Every successful game AI (AlphaStar, OpenAI Five) was pre-trained on expert data that included the full behavioral repertoire. Our BC was trained on MaxDamagePlayer — an expert at move selection, but an expert that NEVER switches. The agent perfectly learned "never switch" alongside "pick good moves."
+
+**Visual:** Show the action_net bias values — switches at -1.37, moves at +0.08. A 1.46 logit gap that PPO couldn't close in 200K steps. "The weights were screaming 'don't switch' and the reward function had nothing to say about it."
+
+### The Fix: Teach Before Training
+Build a smarter teacher that combines MaxDamage's move selection with competitive switching strategy. Re-train BC on data that includes strategic switching. Then PPO has a starting point that actually includes the skill we want it to refine.

@@ -286,3 +286,26 @@ Pass `strict=False` to `Gen1Env` constructor. Invalid opponent orders now fall b
 
 ### Lesson
 Silent error handling that "recovers" by forfeiting is worse than crashing. The training ran 24K steps of garbage data with no indication anything was wrong. The win rate (25%) looked plausible for a new run. Without checking replays, this could have burned hours of GPU time.
+
+---
+
+## 2026-04-03 — PPO Cannot Learn Switching (Post-Mortem)
+
+### Evidence
+| Run | Steps | Vol.Switch% | BestMv% trend | clip_range | Switch bias |
+|-----|-------|-------------|---------------|------------|-------------|
+| run_037 | 68K | 0.0% | 89→85% (eroding) | 0.1 | -1.37 (BC default) |
+| run_038 | 70K | 0.0% | 90→85% (eroding) | 0.2 | -0.69 (halved) |
+
+### Root Cause Analysis
+1. **Reward signal:** Switching gives 0.0 immediate reward. Benefit is 3-10 turns delayed. Value function (ExplVar=0.2) can't bridge the gap.
+2. **BC bias:** MaxDamagePlayer never switches → BC learned -1.37 switch bias → PPO can't overcome it even with clip_range=0.2.
+3. **No exploration pressure:** ent_coef=0.01 is too low to force random switches. Higher entropy would degrade move quality without targeted switching improvement.
+
+### Decision: Re-do BC with a Switching Teacher
+Pure RL cannot discover switching from the current reward signal. Need to teach switching through imitation, then let PPO refine.
+
+Approach: Build a competitive-informed heuristic that combines strong move selection with strategic switching decisions. Generate BC data, retrain, then resume mixed league PPO with the new warm-start.
+
+### Key Insight
+This matches how all successful game AIs work: supervised pre-training on expert data → RL fine-tuning. The pre-training establishes the behavioral repertoire. If the expert data lacks a skill, RL alone won't discover it.
