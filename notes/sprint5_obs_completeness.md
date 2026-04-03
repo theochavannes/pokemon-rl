@@ -81,9 +81,50 @@ Source: Check move flags or maintain a list of known trapping move IDs.
 
 ---
 
+## Step 9: Status immunity flag (+1 per own move)
+
+The agent doesn't know that Poison types are immune to Toxic, Fire types immune to burn, etc. Showdown blocks the move silently — wasted turn.
+
+Gen 1 status immunities:
+- **Poison/Toxic**: Poison types immune
+- **Burn**: Fire types immune
+- **Freeze**: Ice types immune
+- **Thunder Wave**: Ground types immune (Electric-type move, type immunity)
+- **Paralysis (via Body Slam etc.)**: No immunity in Gen 1 (Electric immunity added Gen 6+)
+- **Sleep**: No type immunity (Sleep Clause limits to 1 sleeping mon, tracked by Showdown)
+
+Encode as `status_immune = 1.0` if the move's status effect would fail against the target's type.
+
+```python
+def _status_immune(move, target) -> float:
+    """Check if target's type makes it immune to this move's status effect."""
+    if not move.status:
+        return 0.0
+    status = str(move.status)
+    t1 = target.type_1
+    t2 = target.type_2
+    types = [t for t in [t1, t2] if t is not None]
+    type_names = [str(t).split()[0].upper() for t in types]
+    if status.startswith("PSN") or status.startswith("TOX"):
+        if "POISON" in type_names:
+            return 1.0
+    elif status.startswith("BRN"):
+        if "FIRE" in type_names:
+            return 1.0
+    elif status.startswith("FRZ"):
+        if "ICE" in type_names:
+            return 1.0
+    # Thunder Wave: handled by effectiveness=0 for Ground types
+    return 0.0
+```
+
+Also update SmartHeuristicPlayer to check immunity before using status moves.
+
+---
+
 ## Dimension estimate
 
-~928 + ~70 new dims = ~998 dims. Exact count depends on which steps are feasible.
+~928 + ~75 new dims = ~1003 dims. Exact count depends on which steps are feasible.
 
 **Breaking change:** Must retrain BC from scratch (mid-vector feature insertion).
 
@@ -93,4 +134,5 @@ Source: Check move flags or maintain a list of known trapping move IDs.
 
 1. Tests pass with updated shapes
 2. Spot-check: Thunder Wave vs statused opponent shows target_statused=1
+3. Spot-check: Toxic vs Poison-type opponent shows status_immune=1
 3. Benchmark SmartHeuristic: >10% status move usage in BC data
