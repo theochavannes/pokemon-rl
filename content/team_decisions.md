@@ -452,6 +452,14 @@ Behavioral cloning now uses the same two-tower architecture so the warm-start mo
 ### Self-Play Population (Sprint 7 Step 8)
 Instead of always playing against the latest frozen model, the self-play opponent is randomly sampled from the league snapshot pool. Every 50K steps, a new snapshot is added. This prevents overfitting to a single opponent's weaknesses — the core idea from AlphaStar's fictitious self-play.
 
+### Reverted: VecNormalize (run_045 post-mortem)
+VecNormalize was removed. All obs features are already manually normalized to [0,1] or [-1,1]. Double-normalization distorted sparse binary features (status_immune: 0→-0.23, 1→4.32). run_045 with VecNormalize collapsed from 39%→16% WR; run_043 without it hit 62%.
+
+### Reverted: Two-Tower Architecture (run_045 post-mortem)
+PokemonFeatureExtractor deferred. BC cross-entropy couldn't optimize it — loss plateaued at epoch 1, accuracy stuck at 46.6% (vs 99% with flat MLP). Code preserved in `src/env/feature_extractor.py` for future use. Using flat MLP [256,128] pi/vf.
+
+Full migration plan for re-introducing two-tower at the right time: `notes/two_tower_migration_plan.md`. Key insight from [RL]: train flat MLP to 60% WR first, then distill weights into two-tower structure. Every successful game AI introduces architectural complexity gradually — we tried to skip the crawl phase.
+
 ### Obs Dimension: 1559
 | Section | S5 (928→1222) | S7 (1222→1559) | Delta |
 |---------|---------------|----------------|-------|

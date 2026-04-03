@@ -370,6 +370,21 @@ This is fictitious self-play, the same technique used in AlphaStar and OpenAI Fi
 
 **Visual:** Timeline showing snapshots accumulating: "Step 50K: first snapshot. Step 100K: pool of 2. Step 500K: pool of 10 past selves." Show the random selection — "this game, you're playing against yourself from 200K steps ago."
 
+### The Two-Tower Disaster (Sprint 5-6-7 Post-Mortem)
+**Hook:** "We assembled a 16-expert panel, implemented every recommendation, and the AI got WORSE."
+
+Sprint 5 added 19 new obs features (status immunity, trapping, volatile status). Sprint 6 added a two-tower neural network architecture. Sprint 7 added more per-move features. Total: 928 to 1559 dimensions with a brain that processes own-team and opponent separately.
+
+**The result:** run_045 peaked at 39% win rate and collapsed to 16% over 600K steps. run_043 (before the sprints) hit 62%.
+
+**Root cause:** The two-tower architecture killed the BC warm-start. Old BC: 99% accuracy imitating MaxDamagePlayer with a flat MLP. New BC: 46.6% accuracy with two-tower. The loss literally plateaued at epoch 1 — the model couldn't learn AT ALL with the complex architecture.
+
+**The deeper lesson:** Good architecture + bad initialization = worse than simple architecture + good initialization. Every successful game AI (AlphaStar, OpenAI Five) introduces complexity gradually. We tried to do it all at once.
+
+**Visual:** Two training curves overlaid. run_043 (flat MLP, 928 dims): steady climb to 62%. run_045 (two-tower, 1559 dims): brief plateau at 39%, then free-fall to 16%. "More features, bigger brain, worse results."
+
+**Why it's great content:** This is the "hubris" moment in the story. The team got confident after Sprint 3A's success and tried to do too much at once. The fix reveals the right approach: crawl, then walk, then run.
+
 ### The Polish Pass (Sprint 7)
 **Hook:** "We added 6 more features per move that the pros said matter. Hyper Beam skips your next turn. Dream Eater only works on sleeping targets. Blizzard has 5 PP — use it wisely."
 
