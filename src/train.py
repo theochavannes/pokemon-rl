@@ -48,9 +48,10 @@ BATTLE_FORMAT = "gen1randombattle"
 N_ENVS = 4
 
 PPO_KWARGS = dict(
-    policy="MlpPolicy",  # [64, 64] MLP — tested [128,128] and [256,256], both worse
+    policy="MlpPolicy",
+    policy_kwargs=dict(net_arch=dict(pi=[256, 128], vf=[256, 128])),  # separate pi/vf networks
     n_steps=2048,
-    batch_size=64,
+    batch_size=128,  # larger batch for gradient stability with bigger network
     n_epochs=10,
     gamma=0.99,  # Effective horizon ~100 turns (avg game ~50 turns)
     gae_lambda=0.95,
@@ -63,39 +64,13 @@ PPO_KWARGS = dict(
 CURRICULUM = [
     dict(
         name="A",
-        opponent_type="random",
-        phase_label="Random",
-        target_wr=0.90,
-        max_steps=200_000,
-        shaping_factor=1.0,
-    ),
-    dict(
-        name="B",
-        opponent_type="random_attacker",
-        phase_label="RandAttacker",
-        target_wr=0.95,
-        max_steps=200_000,
-        shaping_factor=1.0,
-    ),
-    dict(
-        name="C",
-        opponent_type="softmax_damage",
-        phase_label="SoftmaxDmg",
+        opponent_type="mixed_league",
+        phase_label="League",
         target_wr=0.70,
-        max_steps=400_000,
+        max_steps=2_000_000,
         shaping_factor=1.0,
-        epsilon_start=2.0,  # temperature: 2.0 = soft, anneals to 0.1 = near-argmax
+        epsilon_start=2.0,  # SoftmaxDamagePlayer temperature: 2.0 = soft, anneals to 0.1
         epsilon_end=0.1,
-    ),
-    dict(
-        name="D",
-        opponent_type="mixed",
-        phase_label="Mixed+Self",
-        target_wr=0.60,
-        max_steps=500_000,
-        shaping_factor=1.0,
-        epsilon_start=0.95,
-        epsilon_end=0.0,
         selfplay=True,
     ),
 ]
@@ -145,7 +120,7 @@ def main(new_run: bool = False) -> None:
         # Restore epsilon from saved progress if resuming this phase
         if progress.get("phase") == phase["name"] and "epsilon" in progress:
             epsilon_start = progress["epsilon"]
-            print(f"  Resuming with ε={epsilon_start:.2f} (from saved progress)")
+            print(f"  Resuming with eps={epsilon_start:.2f} (from saved progress)")
 
         # Calculate remaining steps if resuming mid-phase
         remaining_steps = phase["max_steps"]
@@ -159,11 +134,11 @@ def main(new_run: bool = False) -> None:
         )
         print(f"  Reward shaping: {shaping:.0%}")
         if epsilon_start is not None:
-            print(f"  Opponent ε: {epsilon_start} → {phase.get('epsilon_end', 0.0)} (anneals on win rate)")
+            print(f"  Opponent eps: {epsilon_start} -> {phase.get('epsilon_end', 0.0)} (anneals on win rate)")
         selfplay_path = str(Path(run.models_dir) / "selfplay_frozen") if phase.get("selfplay") else None
         if selfplay_path:
             print("  Self-play: ON (frozen opponent updated every 200 battles)")
-        print(f"  Replays → {replay_dir}")
+        print(f"  Replays -> {replay_dir}")
         print(f"{'=' * 60}\n")
 
         # Save current best as initial frozen opponent for self-play
@@ -175,6 +150,18 @@ def main(new_run: bool = False) -> None:
                 _PPO.load(str(best.with_suffix(""))).save(selfplay_path)
             elif model is not None:
                 model.save(selfplay_path)
+            else:
+                # First phase, no model yet — use BC warm-start as initial frozen opponent
+                bc_seed = Path("models/bc_warmstart.zip")
+                if bc_seed.exists():
+                    from sb3_contrib import MaskablePPO as _PPO
+
+                    _PPO.load(str(bc_seed.with_suffix(""))).save(selfplay_path)
+                    print("  Self-play: initialized frozen opponent from BC warm-start")
+                else:
+                    raise FileNotFoundError(
+                        "Self-play requires a model but no best_model.zip or models/bc_warmstart.zip found"
+                    )
 
         env_fns = [
             partial(
@@ -222,7 +209,12 @@ def main(new_run: bool = False) -> None:
                             **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
                             tensorboard_log=run.logs_dir,
                         )
-                        print("  BC warm-start loaded — skipping logit bias")
+                        # Halve the BC-inherited anti-switch bias so PPO can learn switching
+                        with torch.no_grad():
+                            before = model.policy.action_net.bias.data[:6].mean().item()
+                            model.policy.action_net.bias.data[:6] *= 0.5
+                            after = model.policy.action_net.bias.data[:6].mean().item()
+                            print(f"  BC warm-start loaded -- switch bias halved: {before:.2f} -> {after:.2f}")
                     else:
                         print("  BC warm-start obs space mismatch — transferring weights")
                         model = load_with_expanded_obs(
@@ -305,17 +297,18 @@ def main(new_run: bool = False) -> None:
 
         # Save phase completion + progress for resume
         current_epsilon = None
-        if opponents:
-            opp = opponents[0]
+        for opp in opponents:
             if hasattr(opp, "temperature"):
                 current_epsilon = opp.temperature
-            elif hasattr(opp, "epsilon"):
+                break
+            if hasattr(opp, "epsilon"):
                 current_epsilon = opp.epsilon
+                break
         run.save_progress(phase["name"], phase["max_steps"], current_epsilon)
 
         phase_path = str(Path(run.models_dir) / f"phase_{phase['name']}_final")
         model.save(phase_path)
-        print(f"\n  Phase {phase['name']} complete → {phase_path}.zip")
+        print(f"\n  Phase {phase['name']} complete -> {phase_path}.zip")
 
         # Clear resume state for next phase
         resume_path = None

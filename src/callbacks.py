@@ -10,7 +10,7 @@ WinRateCallback:
   - Appends milestone events to content/hooks.md
 
 Win rate is derived from terminal episode rewards:
-    +1.0 → win   |   -1.0 → loss   (no draws in gen1randombattle)
+    +1.0 -> win   |   -1.0 -> loss   (no draws in gen1randombattle)
 """
 
 import json
@@ -132,6 +132,18 @@ class WinRateCallback(BaseCallback):
         self._own_fainted_total: int = 0  # total own Pokemon fainted
         self._fainted_episode_count: int = 0  # episodes counted for faint stats
 
+        # Per-opponent tracking — windowed (last 100 results per env)
+        self._per_env_results: list[deque] = [deque(maxlen=100) for _ in range(4)]
+        self._per_env_labels: list[str] = ["SelfPlay", "MaxDmg", "TypeMatch", "SoftmaxDmg"]
+
+        # Elo rating — single number to track agent progress
+        # Opponent ratings calibrated from heuristic strength:
+        #   SelfPlay starts at agent's rating (mirror match)
+        #   SoftmaxDmg at high temp is weakest, TypeMatch is hardest
+        self._elo: float = 1000.0
+        self._opp_elo: list[float] = [1000.0, 1300.0, 1500.0, 1100.0]
+        #                              SelfPlay MaxDmg  TypeMatch SoftmaxDmg
+
     def _on_training_start(self) -> None:
         self.content_log.parent.mkdir(parents=True, exist_ok=True)
         self._write_content_log_header()
@@ -145,13 +157,15 @@ class WinRateCallback(BaseCallback):
     def _move_damages_from_obs(obs: np.ndarray) -> np.ndarray:
         """Extract expected damage proxy for each of 4 moves from the observation.
 
-        Own moves start at index 16, with 5 features per move:
-          [base_power, type_index, pp_fraction, effectiveness, accuracy]
+        Own moves start at index 16, with 14 features per move:
+          [base_power, type_index, pp_fraction, effectiveness, accuracy,
+           category, status_effect, priority, self_boost, heal,
+           secondary_chance, recoil, self_destruct, fixed_damage]
         Expected damage proxy = base_power * effectiveness * 4.0  (undo normalization)
         """
         damages = np.zeros(4)
         for i in range(4):
-            base = 16 + i * 5
+            base = 16 + i * 14
             bp = obs[base]  # base_power / 150
             eff = obs[base + 3]  # effectiveness / 4
             damages[i] = bp * eff * 4.0  # rough damage proxy
@@ -197,7 +211,7 @@ class WinRateCallback(BaseCallback):
                                 self._best_move_picks += 1
 
         # Track episode outcomes
-        for info in self.locals.get("infos", []):
+        for env_idx, info in enumerate(self.locals.get("infos", [])):
             if "episode" in info:
                 self._total_episodes += 1
                 reward = info["episode"]["r"]
@@ -205,6 +219,14 @@ class WinRateCallback(BaseCallback):
                 self._episode_rewards.append(reward)
                 self._episode_lengths.append(length)
                 self._epsilon_rewards.append(reward)
+
+                # Per-opponent tracking (DummyVecEnv: env_idx maps to opponent)
+                if env_idx < len(self._per_env_results):
+                    won = reward >= 0.5
+                    self._per_env_results[env_idx].append(1.0 if won else 0.0)
+                    # Elo update (K=16 for stable progression)
+                    expected = 1.0 / (1.0 + 10.0 ** ((self._opp_elo[env_idx] - self._elo) / 400.0))
+                    self._elo += 16.0 * ((1.0 if won else 0.0) - expected)
 
                 # Log first 10 episodes individually so user sees something early
                 if self._total_episodes <= 10:
@@ -252,23 +274,26 @@ class WinRateCallback(BaseCallback):
                 epsilon_done = True
                 if self.epsilon_schedule and self.opponents:
                     _, end_val = self.epsilon_schedule
-                    opp = self.opponents[0]
-                    if hasattr(opp, "temperature"):
-                        epsilon_done = opp.temperature <= end_val + 0.05
+                    temp_opps = [o for o in self.opponents if hasattr(o, "temperature")]
+                    eps_opps = [o for o in self.opponents if hasattr(o, "epsilon")]
+                    if temp_opps:
+                        cur = temp_opps[0].temperature
+                        epsilon_done = cur <= end_val + 0.05
                         if not epsilon_done:
-                            log.debug("Curriculum: temperature=%.2f, need <=%.2f to graduate", opp.temperature, end_val)
+                            log.debug("Curriculum: temperature=%.2f, need <=%.2f to graduate", cur, end_val)
                             if self.verbose and not hasattr(self, "_eps_warned"):
                                 print(
-                                    f"  [Curriculum] temperature still at {opp.temperature:.2f} — phase won't end until {end_val:.2f}"
+                                    f"  [Curriculum] temperature still at {cur:.2f} — phase won't end until {end_val:.2f}"
                                 )
                                 self._eps_warned = True
-                    elif hasattr(opp, "epsilon"):
-                        epsilon_done = opp.epsilon <= end_val + 0.01
+                    elif eps_opps:
+                        cur = eps_opps[0].epsilon
+                        epsilon_done = cur <= end_val + 0.01
                         if not epsilon_done:
-                            log.debug("Curriculum: epsilon=%.2f, need <=%.2f to graduate", opp.epsilon, end_val)
+                            log.debug("Curriculum: epsilon=%.2f, need <=%.2f to graduate", cur, end_val)
                             if self.verbose and not hasattr(self, "_eps_warned"):
                                 print(
-                                    f"  [Curriculum] epsilon still at {opp.epsilon:.2f} — phase won't end until {end_val:.2f}"
+                                    f"  [Curriculum] epsilon still at {cur:.2f} — phase won't end until {end_val:.2f}"
                                 )
                                 self._eps_warned = True
 
@@ -339,10 +364,30 @@ class WinRateCallback(BaseCallback):
         self.logger.record("train/damage_efficiency", dmg_efficiency, exclude=_tb_only)
         self.logger.record("train/mean_episode_return", mean_return, exclude=_tb_only)
         self.logger.record("train/return_std", return_std, exclude=_tb_only)
+        # Per-opponent win rates (mixed_league) — windowed last 100
+        for idx, lbl in enumerate(self._per_env_labels):
+            if len(self._per_env_results[idx]) > 0:
+                opp_wr = float(np.mean(list(self._per_env_results[idx])))
+                self.logger.record(f"train/wr_{lbl}", opp_wr, exclude=_tb_only)
+        self.logger.record("train/elo", self._elo, exclude=_tb_only)
+        # Desync tracking — how many battles ended in forfeit due to ValueError
+        total_desyncs = 0
+        if self._env and hasattr(self._env, "envs"):
+            for e in self._env.envs:
+                # Navigate wrapper chain: Monitor -> SB3Wrapper
+                inner = e
+                while hasattr(inner, "env"):
+                    if hasattr(inner, "desync_count"):
+                        total_desyncs += inner.desync_count
+                        break
+                    inner = inner.env
+        desync_rate = (total_desyncs / self._total_episodes * 100) if self._total_episodes > 0 else 0.0
+        if total_desyncs > 0:
+            self.logger.record("train/desync_count", total_desyncs, exclude=_tb_only)
+            self.logger.record("train/desync_rate_pct", desync_rate, exclude=_tb_only)
         self.logger.dump(self.num_timesteps)
 
-        # Decay reward shaping based on total battles
-        self._decay_shaping()
+        # Shaping decay disabled — Gen1Env.calc_reward() no longer uses shaping_factor
 
         # Anneal opponent epsilon based on win rate
         self._maybe_anneal_epsilon(win_rate)
@@ -353,15 +398,19 @@ class WinRateCallback(BaseCallback):
         # Always log eval to file (structured for post-run analysis)
         label = self.phase_label or "opponent"
         eps_str = ""
-        if self.opponents:
-            opp = self.opponents[0]
+        for opp in self.opponents:
             if hasattr(opp, "temperature"):
                 eps_str = f" temp={opp.temperature:.2f}"
-            elif hasattr(opp, "epsilon"):
+                break
+            if hasattr(opp, "epsilon"):
                 eps_str = f" opp_eps={opp.epsilon:.2f}"
+                break
+        desync_str = ""
+        if total_desyncs > 0:
+            desync_str = f" desyncs={total_desyncs}({desync_rate:.1f}%)"
         log.info(
             "EVAL step=%d vs=%s win_rate=%.3f avg_turns=%.1f best_move=%.1f%% dmg_eff=%.2f"
-            " vol_switch=%.1f%% forced_switch=%.1f%% expl_var=%.3f episodes=%d%s",
+            " vol_switch=%.1f%% forced_switch=%.1f%% expl_var=%.3f episodes=%d%s%s",
             self.num_timesteps,
             label,
             win_rate,
@@ -373,6 +422,7 @@ class WinRateCallback(BaseCallback):
             expl_var,
             n,
             eps_str,
+            desync_str,
         )
         # Verbose PPO internals to log file only
         if not np.isnan(entropy):
@@ -386,27 +436,46 @@ class WinRateCallback(BaseCallback):
             )
 
         if self.verbose:
-            bar = "█" * int(win_rate * 20) + "░" * (20 - int(win_rate * 20))
+            bar = "#" * int(win_rate * 20) + "-" * (20 - int(win_rate * 20))
             ev_str = f"  ev={expl_var:.2f}" if not np.isnan(expl_var) else ""
+            # Per-opponent breakdown (windowed)
+            opp_parts = []
+            for idx, lbl in enumerate(self._per_env_labels):
+                if len(self._per_env_results[idx]) > 0:
+                    opp_wr = float(np.mean(list(self._per_env_results[idx]))) * 100
+                    opp_parts.append(f"{lbl}={opp_wr:.0f}%")
+            opp_str = f"  [{', '.join(opp_parts)}]" if opp_parts else ""
+            desync_console = f"  !desyncs={total_desyncs}" if total_desyncs > 0 else ""
             print(
-                f"  step {self.num_timesteps:>6,} │ "
+                f"  step {self.num_timesteps:>6,} | Elo {self._elo:>6.0f} | "
                 f"vs {label}: {win_rate * 100:>5.1f}%  [{bar}]  "
                 f"avg {avg_length:.0f} turns  "
                 f"bestmv {best_move_rate:.0f}%  dmgeff {dmg_efficiency:.2f}  "
                 f"vol.sw {vol_switch_pct:.0f}%  forced {forced_switch_pct:.0f}%{ev_str}  "
-                f"({n} eps){eps_str}"
+                f"({n} eps){eps_str}{opp_str}{desync_console}"
             )
 
-        # Update frozen self-play opponent periodically
-        if self.selfplay_path and self._total_episodes - self._last_selfplay_update >= self.selfplay_update_freq:
-            self._last_selfplay_update = self._total_episodes
+        # Update frozen self-play opponent every 50K steps
+        if self.selfplay_path and self.num_timesteps - self._last_selfplay_update >= 50_000:
+            self._last_selfplay_update = self.num_timesteps
             self.model.save(self.selfplay_path)
             for opp in self.opponents:
                 if hasattr(opp, "swap_model"):
                     opp.swap_model(self.selfplay_path)
-            log.info("SelfPlay: frozen opponent updated (step %d)", self.num_timesteps)
+            # Update self-play opponent Elo to match current agent
+            self._opp_elo[0] = self._elo
+            log.info("SelfPlay: frozen opponent updated (step %d, Elo %.0f)", self.num_timesteps, self._elo)
             if self.verbose:
-                print(f"  [SelfPlay] Frozen opponent updated (step {self.num_timesteps})")
+                print(f"  [SelfPlay] Frozen opponent updated (step {self.num_timesteps}, Elo {self._elo:.0f})")
+            # Save numbered snapshot for future fictitious self-play
+            league_dir = Path(self.save_path) / "league"
+            league_dir.mkdir(exist_ok=True)
+            snapshot_num = self.num_timesteps // 1000
+            snapshot_path = str(league_dir / f"snapshot_{snapshot_num:04d}")
+            self.model.save(snapshot_path)
+            log.info("SelfPlay: saved league/snapshot_%04d", snapshot_num)
+            if self.verbose:
+                print(f"  [SelfPlay] Saved league/snapshot_{snapshot_num:04d}")
 
         # Save best model -- keep timestamped copy + symlink-style "best_model"
         if win_rate > self._best_win_rate and n >= self.window // 2:
@@ -424,7 +493,14 @@ class WinRateCallback(BaseCallback):
 
         # Save progress for resume
         if self.run_manager and self.phase_name:
-            eps = self.opponents[0].epsilon if self.opponents and hasattr(self.opponents[0], "epsilon") else None
+            eps = None
+            for opp in self.opponents:
+                if hasattr(opp, "temperature"):
+                    eps = opp.temperature
+                    break
+                if hasattr(opp, "epsilon"):
+                    eps = opp.epsilon
+                    break
             self.run_manager.save_progress(self.phase_name, self.num_timesteps, eps)
 
         # Write checkpoint metadata so tournament scripts know each model's win rate
@@ -458,12 +534,29 @@ class WinRateCallback(BaseCallback):
         expl_var,
     ) -> None:
         """Append a row to content/training_log.md."""
-        top_move = int(np.argmax(self._action_counts[6:])) + 1  # 1-indexed
-        top_move_pct = action_pct[6 + np.argmax(self._action_counts[6:])]
         ev_str = f"{expl_var:>6.3f}" if not np.isnan(expl_var) else "   N/A"
+
+        # Per-opponent win rates (windowed)
+        opp_strs = []
+        for idx, lbl in enumerate(self._per_env_labels):
+            if len(self._per_env_results[idx]) > 0:
+                opp_wr = float(np.mean(list(self._per_env_results[idx]))) * 100
+                opp_strs.append(f"{lbl}={opp_wr:.0f}%")
+        opp_col = ", ".join(opp_strs) if opp_strs else "N/A"
+
+        # Temperature/epsilon
+        temp_str = "N/A"
+        for opp in self.opponents:
+            if hasattr(opp, "temperature"):
+                temp_str = f"{opp.temperature:.2f}"
+                break
+            if hasattr(opp, "epsilon"):
+                temp_str = f"{opp.epsilon:.2f}"
+                break
 
         row = (
             f"| {self.num_timesteps:>7} "
+            f"| {self._elo:>4.0f} "
             f"| {win_rate:.3f} "
             f"| {avg_length:>5.1f} "
             f"| {best_move_rate:>5.1f}% "
@@ -471,7 +564,8 @@ class WinRateCallback(BaseCallback):
             f"| {ev_str} "
             f"| {vol_switch_pct:>5.1f}% "
             f"| {forced_switch_pct:>5.1f}% "
-            f"| move_{top_move} ({top_move_pct:.1f}%) "
+            f"| {temp_str} "
+            f"| {opp_col} "
             f"| {n} |\n"
         )
         with open(self.content_log, "a", encoding="utf-8") as f:
@@ -515,14 +609,14 @@ class WinRateCallback(BaseCallback):
         log.info("Snapped %d replays -> replays/notable/ (step %s, wr=%.3f)", len(replay_files), step_label, win_rate)
         if self.verbose:
             print(
-                f"[MEDIA]  Snapped {len(replay_files)} replays → "
+                f"[MEDIA]  Snapped {len(replay_files)} replays -> "
                 f"replays/notable/ (step {step_label}, wr={win_rate:.3f})"
             )
 
     def _write_checkpoint_metadata(self, win_rate: float, avg_length: float) -> None:
         """
         Append a metadata entry to models/checkpoint_registry.json.
-        Each entry maps a checkpoint filename → stats at the time of saving.
+        Each entry maps a checkpoint filename -> stats at the time of saving.
         Used by tournament and comparison scripts to select agents.
         """
         registry_path = Path(self.save_path) / "checkpoint_registry.json"
@@ -600,50 +694,52 @@ class WinRateCallback(BaseCallback):
                 print(f"  [Entropy] Winning at {win_rate:.0%} — decreased ent_coef to {new_ent:.3f}")
 
     def _maybe_anneal_epsilon(self, win_rate: float) -> None:
-        """Set opponent epsilon as a continuous function of win rate.
+        """Set opponent epsilon/temperature as a continuous function of win rate.
 
-        epsilon = 1.0 - win_rate (clamped to [eps_end, eps_start])
-        Win 30% → epsilon 0.70 (mostly random)
-        Win 80% → epsilon 0.20 (mostly strategic)
-        No thresholds, no triggers — perfectly smooth.
+        Searches all opponents for annealable attributes (temperature or epsilon)
+        rather than assuming opponents[0] is the target. This supports mixed_league
+        where opponents[0] is FrozenPolicyPlayer (no temperature/epsilon).
         """
         if not self.epsilon_schedule or not self.opponents:
             return
         eps_start, eps_end = self.epsilon_schedule
-        if not hasattr(self.opponents[0], "epsilon") and not hasattr(self.opponents[0], "temperature"):
-            return
         if len(self._epsilon_rewards) < 500:
+            return
+
+        # Find annealable opponents by type
+        temp_opps = [o for o in self.opponents if hasattr(o, "temperature")]
+        eps_opps = [o for o in self.opponents if hasattr(o, "epsilon")]
+        if not temp_opps and not eps_opps:
             return
 
         eps_win_rate = float(np.mean([1.0 if r >= 0.5 else 0.0 for r in self._epsilon_rewards]))
 
-        # Handle both epsilon-based and temperature-based opponents
-        if hasattr(self.opponents[0], "temperature"):
+        if temp_opps:
             # Softmax: temperature = 2.0 at wr=0%, 0.1 at wr=100%
+            current_temp = temp_opps[0].temperature
             target_temp = 2.0 * (1.0 - eps_win_rate) + 0.1 * eps_win_rate
-            current_temp = self.opponents[0].temperature
             # Rate limit: max change 0.1 per eval
             new_temp = current_temp + max(min(target_temp - current_temp, 0.1), -0.1)
             if abs(new_temp - current_temp) > 0.01:
-                for opp in self.opponents:
-                    if hasattr(opp, "temperature"):
-                        opp.temperature = new_temp
+                for opp in temp_opps:
+                    opp.temperature = new_temp
                 log.info("Curriculum: temperature %.2f -> %.2f (wr500=%.2f)", current_temp, new_temp, eps_win_rate)
                 if self.verbose:
-                    print(f"  [Curriculum] temperature: {current_temp:.2f} → {new_temp:.2f} (wr500={eps_win_rate:.2f})")
-        elif hasattr(self.opponents[0], "epsilon"):
+                    print(
+                        f"  [Curriculum] temperature: {current_temp:.2f} -> {new_temp:.2f} (wr500={eps_win_rate:.2f})"
+                    )
+        elif eps_opps:
+            current_eps = eps_opps[0].epsilon
             target_eps = max(min(1.0 - eps_win_rate, eps_start), eps_end)
-            current_eps = self.opponents[0].epsilon
             # Clamp: max drop 0.03, max rise 0.05
             new_eps = max(target_eps, current_eps - 0.03)
             new_eps = min(new_eps, max(target_eps, current_eps + 0.05))
             if abs(new_eps - current_eps) > 0.005:
-                for opp in self.opponents:
-                    if hasattr(opp, "epsilon"):
-                        opp.epsilon = new_eps
+                for opp in eps_opps:
+                    opp.epsilon = new_eps
                 log.info("Curriculum: epsilon %.2f -> %.2f (wr500=%.2f)", current_eps, new_eps, eps_win_rate)
                 if self.verbose:
-                    print(f"  [Curriculum] epsilon: {current_eps:.2f} → {new_eps:.2f} (wr500={eps_win_rate:.2f})")
+                    print(f"  [Curriculum] epsilon: {current_eps:.2f} -> {new_eps:.2f} (wr500={eps_win_rate:.2f})")
 
     def _nearest_milestone(self) -> int | None:
         for m in _REPLAY_MILESTONES:
@@ -660,8 +756,8 @@ class WinRateCallback(BaseCallback):
             f"\n## Phase vs {label}\n\n"
             f"Started: {date}  \n"
             f"Target: {target * 100:.0f}% win rate\n\n"
-            f"| Step    | Win Rate | Avg Turns | BestMv% | DmgEff | ExplVar | Vol.Sw% | Forced% | Top Move         | Episodes |\n"
-            f"|---------|----------|-----------|---------|--------|---------|---------|---------|------------------|----------|\n"
+            f"| Step    | Elo  | Win Rate | Avg Turns | BestMv% | DmgEff | ExplVar | Vol.Sw% | Forced% | Temp  | Per-Opponent WR          | Episodes |\n"
+            f"|---------|------|----------|-----------|---------|--------|---------|---------|---------|-------|--------------------------|----------|\n"
         )
         mode = "a" if self.content_log.exists() else "w"
         with open(self.content_log, mode, encoding="utf-8") as f:

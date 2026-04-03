@@ -237,3 +237,94 @@ The key insight came from the competitive player: **type charts don't predict Ge
 Root cause: the callback was reading the action mask AFTER the step executed, not before. After a forced switch completes, the new state has moves available → classified as voluntary. Every forced switch was being miscounted.
 
 **Visual:** Code diff — one line change (`self._get_action_masks()` → `self.locals["action_masks"]`).
+
+---
+
+## Act 6: The League (Sprint 3A — 2026-04-03)
+
+### The Architecture Pivot
+**Hook:** "We threw out the entire training curriculum and started over."
+
+The sequential 4-phase curriculum (Random → RandomAttacker → SoftmaxDamage → Mixed) was fundamentally flawed: each phase trained the agent for one opponent, then the next phase's new opponent erased what it learned. Classic catastrophic forgetting.
+
+**Before:** 4 phases, each with one opponent type. Agent masters each, then forgets.
+**After:** 1 phase, 4 opponents simultaneously. Every rollout includes self-play, MaxDamage, TypeMatchup, and SoftmaxDamage. The agent can never forget because every opponent is always present.
+
+**Visual:** Side-by-side training curves — old curriculum showing the "cliff" at each phase transition vs new mixed league with (hopefully) smooth improvement.
+
+### The Conservative Clipping Trick
+**Hook:** "One number change to prevent the AI from forgetting everything it learned."
+
+PPO's `clip_range` went from 0.2 to 0.1. This limits how much the policy can change per gradient update — an implicit trust region that keeps the agent close to its BC warm-start. Used in InstructGPT/ChatGPT's RLHF training for the same reason: prevent the fine-tuned model from drifting too far from its supervised starting point.
+
+**Why it's good content:** Connects our Pokemon project to state-of-the-art LLM training. "The same trick OpenAI uses to keep ChatGPT from going off the rails."
+
+### The League Roster
+**Visual:** Show all 4 opponents in a "league bracket" format:
+- **Self-Play (Env 0):** A frozen copy of the agent itself, updated every 50K steps. Starts as the BC warm-start (a MaxDamage clone). Gets progressively smarter as training continues.
+- **MaxDamagePlayer (Env 1):** Always picks the highest-damage move. Pure aggression.
+- **TypeMatchupPlayer (Env 2):** Switches to type advantages. Forces the agent to handle smart switching.
+- **SoftmaxDamagePlayer (Env 3):** Probabilistic damage selection, temperature anneals from random-ish (2.0) to near-deterministic (0.1) based on the agent's win rate.
+
+### The Silent Forfeit Catastrophe
+**Hook:** "The agent was forfeiting every single game and the training just kept going like nothing was wrong."
+
+First mixed_league run (run_036): 25% win rate, 9-turn average, 0% voluntary switches. Looked bad but not suspicious. Then we opened the replays — **every game ended with the agent forfeiting**, many on turn 1 before any moves were played.
+
+**Root cause:** poke-env validates opponent moves with `strict=True`. When the opponent's chosen order doesn't match valid orders (battle state timing), it raises ValueError. Our error handler caught it and called reset() — which forfeits the current game.
+
+**The kicker:** Env 0 (self-play via FrozenPolicyPlayer) worked perfectly because FrozenPolicyPlayer uses `strict=False`. The heuristic opponents (MaxDamage, TypeMatchup, SoftmaxDamage) all forfeited every game. The training ran for 24K steps of pure garbage data and never flagged a problem.
+
+**Fix:** One line — `strict=False` in the Gen1Env constructor. Invalid orders now gracefully fall back to random instead of crashing.
+
+**Visual:** Side-by-side replay comparison — "working" game (env 0, 40+ turns) vs "broken" game (env 1, forfeit on turn 1). Same code, same agent, different outcome based on one boolean flag buried in poke-env internals.
+
+### What to Watch For
+- Does BestMv% stay above 70%? (BC knowledge preserved)
+- Does Vol.Switch% start increasing? (TypeMatchup forcing switching decisions)
+- Does the agent beat all heuristics at >50% within 500K steps?
+- Does the self-play opponent matter, or does the agent just learn from heuristics?
+
+---
+
+## Act 7: The Switching Problem (2026-04-03)
+
+### PPO Cannot Learn Switching
+**Hook:** "We spent 200,000 steps trying to teach an AI to switch Pokemon. It never switched once."
+
+After fixing the forfeit bug, the mixed league ran properly — real games, 27-turn averages, all opponents active. But across two full runs (run_037 and run_038), voluntary switch rate stayed at exactly 0.0%. The agent NEVER voluntarily switched a single time.
+
+**Why:** The BC warm-start was trained on MaxDamagePlayer, which never switches. The agent inherited a -1.37 logit bias against switching. We tried:
+- Halving the bias (-1.37 → -0.69): no effect
+- clip_range 0.1 (conservative): biases literally didn't move in 68K steps
+- clip_range 0.2 (standard): biases drifted but BestMv% eroded without gaining switching
+
+**The deeper problem:** Switching produces ZERO immediate reward. The reward function gives +0.5 for KOs and +1.0 for winning. When you switch to resist a hit, the reward that turn is 0.0. The benefit shows up 3-10 turns later when you eventually KO. No RL algorithm can learn a behavior that produces no measurable signal.
+
+### The Realization
+**Hook:** "You can't learn a skill no one ever showed you."
+
+Every successful game AI (AlphaStar, OpenAI Five) was pre-trained on expert data that included the full behavioral repertoire. Our BC was trained on MaxDamagePlayer — an expert at move selection, but an expert that NEVER switches. The agent perfectly learned "never switch" alongside "pick good moves."
+
+**Visual:** Show the action_net bias values — switches at -1.37, moves at +0.08. A 1.46 logit gap that PPO couldn't close in 200K steps. "The weights were screaming 'don't switch' and the reward function had nothing to say about it."
+
+### The Fix: Teach Before Training
+Build a smarter teacher that combines MaxDamage's move selection with competitive switching strategy. Re-train BC on data that includes strategic switching. Then PPO has a starting point that actually includes the skill we want it to refine.
+
+### The Deeper Problem: The AI Doesn't Know What Its Moves Do
+**Hook:** "We realized the AI was playing Pokemon without knowing what its moves actually do."
+
+The observation space gives each move 5 features: base_power, type, PP, effectiveness, accuracy. That's it. Thunder Wave (the most important move in Gen 1) looks like "0 damage, Electric type, 100% accuracy." Swords Dance looks like "0 damage, Normal type, 100% accuracy." Recover looks like "0 damage, Normal type, 100% accuracy." They're all identical to the neural network — and all look worse than any attacking move.
+
+The agent has ZERO reason to ever use a status move. It can't tell the difference between Thunder Wave (cripples opponent permanently), Swords Dance (doubles attack power), Recover (heals 50% HP), and Splash (does literally nothing). They all look like "0bp move = bad."
+
+**Visual:** Show the 5 move features side by side for Thunder Wave, Swords Dance, Recover, and Splash. All four produce nearly identical observation vectors. "The AI thinks these four moves are the same."
+
+This is like teaching someone chess without telling them that knights can jump, bishops move diagonally, and pawns can promote. You can learn some basic strategy, but you'll never play well.
+
+### The Brain Too Small for the Job
+**Hook:** "We were trying to teach a brain the size of a walnut to play chess."
+
+The neural network had 63,000 parameters trying to process 704 features. The first layer compressed 704 inputs through 64 neurons — an 11:1 ratio. For comparison, image classifiers compress at 3:1. We upgraded to 300K parameters with [256, 128] layers — 5x the capacity. Combined with encoding what moves actually DO (secondary effects, recoil, self-destruct), the agent can finally see the full game.
+
+**Visual:** Side-by-side network diagrams. Old: 704->64->64->10 (tiny funnel). New: 928->256->128->10 (proper pyramid). "Same game, 5x the brain."

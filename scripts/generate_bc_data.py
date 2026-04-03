@@ -1,13 +1,20 @@
-"""Generate behavioral cloning data from MaxDamagePlayer vs RandomPlayer.
+"""Generate behavioral cloning data from a heuristic teacher.
 
-Runs MaxDamagePlayer against RandomPlayer for N games, recording
+Runs the teacher agent against one or more opponents, recording
 (observation, action, action_mask) at every turn. Saves the dataset
 for supervised pre-training of the RL policy.
+
+Teachers:
+  maxdamage    — MaxDamagePlayer (original, never switches)
+  smart        — SmartHeuristicPlayer (MaxDamage moves + competitive switching)
+
+Opponents: random, maxdamage, typematchup, aggressive_switcher, smart, mixed (all)
 
 Requires: Showdown server running (node pokemon-showdown start --no-security)
 
 Usage:
-    python scripts/generate_bc_data.py                  # 5000 games (default)
+    python scripts/generate_bc_data.py                         # smart vs mixed (default)
+    python scripts/generate_bc_data.py --teacher maxdamage     # original BC
     python scripts/generate_bc_data.py --n-battles 10000
 """
 
@@ -30,14 +37,32 @@ _ROOT = Path(__file__).parent.parent
 os.chdir(_ROOT)
 sys.path.insert(0, str(_ROOT))
 
-from src.agents.heuristic_agent import MaxDamagePlayer
+from src.agents.heuristic_agent import (
+    AggressiveSwitcher,
+    MaxDamagePlayer,
+    SmartHeuristicPlayer,
+    TypeMatchupPlayer,
+)
 from src.env.gen1_env import embed_battle
 
 BATTLE_FORMAT = "gen1randombattle"
 
+_TEACHER_CLS = {
+    "maxdamage": MaxDamagePlayer,
+    "smart": SmartHeuristicPlayer,
+}
 
-class DataCollectingMaxDamage(MaxDamagePlayer):
-    """MaxDamagePlayer that records (obs, action, mask) at every turn."""
+_OPPONENT_CLS = {
+    "random": RandomPlayer,
+    "maxdamage": MaxDamagePlayer,
+    "typematchup": TypeMatchupPlayer,
+    "aggressive_switcher": AggressiveSwitcher,
+    "smart": SmartHeuristicPlayer,
+}
+
+
+class DataCollectingPlayer:
+    """Mixin that records (obs, action, mask) at every turn."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -66,21 +91,32 @@ class DataCollectingMaxDamage(MaxDamagePlayer):
         return order
 
 
-async def collect(n_battles: int) -> dict:
-    collector = DataCollectingMaxDamage(
+def _make_collector_cls(base_cls):
+    """Dynamically create a DataCollecting version of any Player subclass."""
+    return type(f"DataCollecting{base_cls.__name__}", (DataCollectingPlayer, base_cls), {})
+
+
+async def collect(n_battles: int, teacher: str, opponent_name: str) -> dict:
+    import random as _rnd
+    import string as _str
+
+    suffix = "".join(_rnd.choices(_str.ascii_lowercase, k=6))
+    collector_cls = _make_collector_cls(_TEACHER_CLS[teacher])
+    collector = collector_cls(
         battle_format=BATTLE_FORMAT,
-        account_configuration=AccountConfiguration("BCCollector", None),
+        account_configuration=AccountConfiguration(f"BC{suffix}", None),
         max_concurrent_battles=10,
         log_level=40,
     )
-    opponent = RandomPlayer(
+    opp_cls = _OPPONENT_CLS[opponent_name]
+    opponent = opp_cls(
         battle_format=BATTLE_FORMAT,
-        account_configuration=AccountConfiguration("BCOpponent", None),
+        account_configuration=AccountConfiguration(f"BCOpp{suffix}", None),
         max_concurrent_battles=10,
         log_level=40,
     )
 
-    print(f"Collecting data: MaxDamagePlayer vs RandomPlayer ({n_battles} games)...")
+    print(f"Collecting data: {teacher} vs {opponent_name} ({n_battles} games)...")
     await collector.battle_against(opponent, n_battles=n_battles)
 
     wins = collector.n_won_battles
@@ -95,12 +131,35 @@ async def collect(n_battles: int) -> dict:
     }
 
 
+async def collect_mixed(n_battles: int, teacher: str) -> dict:
+    """Collect data against ALL opponents (equal games per opponent)."""
+    per_opp = n_battles // len(_OPPONENT_CLS)
+    all_obs, all_actions, all_masks = [], [], []
+
+    for opp_name in _OPPONENT_CLS:
+        data = await collect(per_opp, teacher, opp_name)
+        all_obs.append(data["observations"])
+        all_actions.append(data["actions"])
+        all_masks.append(data["masks"])
+
+    return {
+        "observations": np.concatenate(all_obs),
+        "actions": np.concatenate(all_actions),
+        "masks": np.concatenate(all_masks),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n-battles", type=int, default=5000)
+    parser.add_argument("--teacher", choices=list(_TEACHER_CLS), default="smart")
+    parser.add_argument("--opponent", choices=[*_OPPONENT_CLS, "mixed"], default="mixed")
     args = parser.parse_args()
 
-    data = asyncio.run(collect(args.n_battles))
+    if args.opponent == "mixed":
+        data = asyncio.run(collect_mixed(args.n_battles, args.teacher))
+    else:
+        data = asyncio.run(collect(args.n_battles, args.teacher, args.opponent))
 
     obs = data["observations"]
     actions = data["actions"]
@@ -114,7 +173,6 @@ def main():
         label = f"switch_{i}" if i < 6 else f"move_{i - 5}"
         print(f"    {label}: {count:>6} ({count / n * 100:>5.1f}%)")
 
-    # Damage quality check: what % of move actions picked the best move?
     move_mask = actions >= 6
     if move_mask.any():
         print(f"\n  Move actions: {move_mask.sum()} ({move_mask.sum() / n * 100:.1f}%)")

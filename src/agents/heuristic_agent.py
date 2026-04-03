@@ -9,6 +9,7 @@ Each agent tests a different skill the RL agent needs to learn:
   - EpsilonMaxDamagePlayer: smooth curriculum bridge (Random ↔ MaxDamage)
 """
 
+import contextlib
 import random as _random
 
 from poke_env.battle.move_category import MoveCategory
@@ -302,11 +303,136 @@ class EpsilonAggressiveSwitcher(_EpsilonMixin, AggressiveSwitcher):
     pass
 
 
+# ---------------------------------------------------------------------------
+# SmartHeuristicPlayer — competitive-informed BC teacher
+# Combines MaxDamage move selection with strategic switching AND status moves.
+# Rules from Gen 1 competitive analysis (Smogon RBY experts):
+#   1. Use status moves strategically (Thunder Wave, Swords Dance, Recover, Toxic)
+#   2. Switch when walled or at severe type disadvantage
+#   3. Switch into resistances, skip low-HP targets
+#   4. Cap switching at ~20% of turns
+#   5. Pick highest damage move otherwise (MaxDamage-style)
+# ---------------------------------------------------------------------------
+
+
+def _is_status_move(move) -> bool:
+    """Check if a move is a status-category move."""
+    return move.category == MoveCategory.STATUS
+
+
+def _should_use_status(move, battle) -> bool:
+    """Decide if a status move is worth using right now."""
+    opp = battle.opponent_active_pokemon
+    own = battle.active_pokemon
+
+    # Thunder Wave / Stun Spore: paralyze if opponent isn't already statused
+    # and opponent is faster (paralyze to gain speed advantage)
+    if move.status and str(move.status).startswith("PAR") and opp.status is None:
+        opp_spe = opp.base_stats.get("spe", 0)
+        own_spe = own.base_stats.get("spe", 0)
+        if opp_spe >= own_spe or opp.base_stats.get("atk", 0) > 120 or opp.base_stats.get("spa", 0) > 120:
+            return True
+
+    # Toxic / Poison: use against bulky opponents (high HP) that aren't already statused
+    if move.status and str(move.status).startswith("TOX") and opp.status is None and opp.current_hp_fraction > 0.6:
+        return True
+
+    # Sleep moves (Hypnosis, Sleep Powder, Sing): always valuable if opponent not statused
+    if move.status and str(move.status).startswith("SLP") and opp.status is None:
+        return True
+
+    # Swords Dance / stat boosts: use if we have HP to spare and good matchup
+    with contextlib.suppress(Exception):
+        boosts = move.self_boost or (move.boosts if _is_status_move(move) else None)
+        if (
+            boosts
+            and any(v > 0 for v in boosts.values())
+            and own.current_hp_fraction > 0.7
+            and _type_advantage(own, opp) <= 0
+        ):
+            max_current_boost = max(own.boosts.get(k, 0) for k in boosts if boosts[k] > 0)
+            if max_current_boost < 4:
+                return True
+
+    # Recovery (Recover, Softboiled, Rest): heal if below 50% HP
+    with contextlib.suppress(Exception):
+        if (
+            (move.heal and move.heal > 0) or move.id in ("recover", "softboiled", "rest")
+        ) and own.current_hp_fraction < 0.50:
+            return True
+
+    return False
+
+
+class SmartHeuristicPlayer(Player):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._turn_count: int = 0
+        self._switch_count: int = 0
+
+    def choose_move(self, battle):
+        self._turn_count += 1
+        opp = battle.opponent_active_pokemon
+        own = battle.active_pokemon
+
+        # --- Status move check (before damage calc) ---
+        if battle.available_moves:
+            for move in battle.available_moves:
+                if _is_status_move(move) and _should_use_status(move, battle):
+                    return self.create_order(move)
+
+        # MaxDamage-style move selection — find best damage move
+        best_move = None
+        best_dmg = 0.0
+        if battle.available_moves:
+            best_move = max(battle.available_moves, key=lambda m: _expected_damage(m, opp))
+            best_dmg = _expected_damage(best_move, opp)
+
+        # --- Switching decision (competitive rules) ---
+        should_switch = False
+
+        if battle.available_switches:
+            switch_rate = self._switch_count / max(self._turn_count, 1)
+            if switch_rate < 0.20:
+                # Switch when walled — best move does negligible damage
+                if best_dmg < 22.0:
+                    should_switch = True
+                # Switch at severe type disadvantage
+                if not should_switch:
+                    own_vs_opp = _type_advantage(own, opp)
+                    if own_vs_opp > 2.0:
+                        should_switch = True
+
+        if should_switch and battle.available_switches:
+            viable = [p for p in battle.available_switches if p.current_hp_fraction > 0.3]
+            if not viable:
+                viable = battle.available_switches
+            best_switch = min(viable, key=lambda p: _type_advantage(p, opp))
+            if _type_advantage(best_switch, opp) < _type_advantage(own, opp) - 0.5:
+                self._switch_count += 1
+                return self.create_order(best_switch)
+
+        # Default: highest damage move
+        if best_move and best_dmg > 0:
+            return self.create_order(best_move)
+
+        # No good attack — try any move
+        if battle.available_moves:
+            return self.create_order(best_move)
+
+        # No moves at all — switch to healthiest
+        if battle.available_switches:
+            return self.create_order(max(battle.available_switches, key=lambda p: p.current_hp_fraction))
+
+        return self.choose_random_move(battle)
+
+
 __all__ = [
     "MaxDamagePlayer",
     "TypeMatchupPlayer",
     "StallPlayer",
     "AggressiveSwitcher",
+    "SmartHeuristicPlayer",
     "EpsilonMaxDamagePlayer",
     "EpsilonTypeMatchupPlayer",
     "EpsilonStallPlayer",

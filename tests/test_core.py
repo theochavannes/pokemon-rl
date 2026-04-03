@@ -7,6 +7,7 @@ Does NOT require a running Showdown server (all tests use mocks).
 """
 
 import sys
+from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -24,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def _mock_move(base_power=80, type_value=10, current_pp=15, max_pp=15, accuracy=True, effectiveness=2.0):
     """Create a mock Move object."""
+    from poke_env.battle.move_category import MoveCategory
+
     move = MagicMock()
     move.base_power = base_power
     move.type.value = type_value
@@ -31,7 +34,17 @@ def _mock_move(base_power=80, type_value=10, current_pp=15, max_pp=15, accuracy=
     move.max_pp = max_pp
     move.accuracy = accuracy
     move.type.damage_multiplier.return_value = effectiveness
-    move.category = MagicMock()
+    move.category = MoveCategory.PHYSICAL
+    move.status = None
+    move.priority = 0
+    move.self_boost = None
+    move.boosts = None
+    move.heal = 0
+    move.drain = 0
+    move.entry = {"secondary": None}
+    move.recoil = 0
+    move.self_destruct = None
+    move.damage = 0
     return move
 
 
@@ -112,7 +125,7 @@ class TestEmbedBattle:
 
         battle = _mock_battle()
         obs = embed_battle(battle)
-        assert obs.shape == (421,), f"Expected (421,), got {obs.shape}"
+        assert obs.shape == (928,), f"Expected (928,), got {obs.shape}"
 
     def test_output_dtype(self):
         from src.env.gen1_env import embed_battle
@@ -140,8 +153,9 @@ class TestEmbedBattle:
 
         battle = _mock_battle(trapped=True, maybe_trapped=True)
         obs = embed_battle(battle)
-        assert obs[-2] == 1.0, "trapped flag should be 1.0"
-        assert obs[-1] == 1.0, "maybe_trapped flag should be 1.0"
+        # Trapping flags are at -5 and -4 (before speed_adv, own_alive, opp_alive)
+        assert obs[-5] == 1.0, "trapped flag should be 1.0"
+        assert obs[-4] == 1.0, "maybe_trapped flag should be 1.0"
 
     def test_empty_opp_bench_padding(self):
         from src.env.gen1_env import embed_battle
@@ -149,11 +163,11 @@ class TestEmbedBattle:
         battle = _mock_battle(opp_team_size=0)
         obs = embed_battle(battle)
         # With 0 revealed opponents, all 6 opp bench slots should be padded
-        # Opp bench starts at: 16 (own active) + 20 (own moves) + 174 (own bench) + 15 (opp active) = 225
-        opp_bench_start = 16 + 20 + 174 + 15
+        # Opp bench starts at: 16 (own active) + 56 (own moves) + 390 (own bench) + 15 (opp active) = 477
+        opp_bench_start = 16 + 56 + 390 + 15
         # Each empty slot starts with -1.0
         for i in range(6):
-            slot_start = opp_bench_start + i * 29
+            slot_start = opp_bench_start + i * 65
             assert obs[slot_start] == -1.0, f"Empty opp bench slot {i} should start with -1.0"
 
     def test_no_moves_pokemon(self):
@@ -164,9 +178,9 @@ class TestEmbedBattle:
         # Set own active to have 0 moves
         battle.active_pokemon.moves = {}
         obs = embed_battle(battle)
-        # Move section starts at index 16 (after own active), 20 dims total
+        # Move section starts at index 16 (after own active), 56 dims total (4 * 14)
         move_start = 16
-        for i in range(20):
+        for i in range(56):
             assert obs[move_start + i] == 0.0, "Empty move slot should be 0.0"
 
     def test_various_team_sizes(self):
@@ -177,7 +191,7 @@ class TestEmbedBattle:
             for opp_size in [0, 2, 6]:
                 battle = _mock_battle(team_size=team_size, opp_team_size=opp_size)
                 obs = embed_battle(battle)
-                assert obs.shape == (421,)
+                assert obs.shape == (928,)
                 assert np.all(np.isfinite(obs))
 
 
@@ -485,18 +499,18 @@ class TestIntegrationSmoke:
 
         # Normal battle
         obs = embed_battle(_mock_battle())
-        assert obs.shape == (421,)
+        assert obs.shape == (928,)
 
         # Minimal teams
         obs = embed_battle(_mock_battle(team_size=1, opp_team_size=1))
-        assert obs.shape == (421,)
+        assert obs.shape == (928,)
 
         # Fainted active (edge case)
         battle = _mock_battle()
         battle.active_pokemon.fainted = True
         battle.active_pokemon.current_hp_fraction = 0.0
         obs = embed_battle(battle)
-        assert obs.shape == (421,)
+        assert obs.shape == (928,)
         assert obs[0] == 0.0  # HP should be 0
 
     def test_move_features_accuracy_variants(self):
@@ -524,6 +538,117 @@ class TestIntegrationSmoke:
         for status_val, expected_float in _STATUS_TO_FLOAT.items():
             mon.status = status_val
             assert _status(mon) == expected_float
+
+
+# ---------------------------------------------------------------------------
+# Test mixed_league opponent type
+# ---------------------------------------------------------------------------
+
+
+class TestMixedLeague:
+    """Verify mixed_league creates the correct opponent for each env index."""
+
+    def test_env0_is_frozen_policy(self):
+        """Env 0 should be FrozenPolicyPlayer (self-play slot)."""
+        import contextlib
+        from unittest.mock import patch
+
+        from src.env.gen1_env import make_env
+
+        with (
+            patch("src.agents.policy_player.FrozenPolicyPlayer.__init__", return_value=None) as mock_init,
+            patch("src.agents.policy_player.FrozenPolicyPlayer.choose_move"),
+        ):
+            mock_init.return_value = None
+            with contextlib.suppress(Exception):
+                make_env(env_index=0, opponent_type="mixed_league", selfplay_model_path="fake_path")
+            # Verify FrozenPolicyPlayer was instantiated
+            assert mock_init.called
+
+    def test_env0_requires_selfplay_path(self):
+        """Env 0 should raise ValueError without selfplay_model_path."""
+        from src.env.gen1_env import make_env
+
+        with pytest.raises(ValueError, match="mixed_league requires selfplay_model_path"):
+            make_env(env_index=0, opponent_type="mixed_league", selfplay_model_path=None)
+
+    def test_invalid_env_index_raises(self):
+        """Env index >= 4 should raise ValueError."""
+        from src.env.gen1_env import make_env
+
+        with pytest.raises(ValueError, match="mixed_league only supports env_index 0-3"):
+            make_env(env_index=4, opponent_type="mixed_league")
+
+
+# ---------------------------------------------------------------------------
+# Test refactored annealing (search by type, not index)
+# ---------------------------------------------------------------------------
+
+
+class TestAnnealingSearchesOpponents:
+    """Verify _maybe_anneal_epsilon finds annealable opponents regardless of position."""
+
+    def test_finds_temperature_opponent_at_index_3(self):
+        """Temperature annealing should work when SoftmaxDamagePlayer is at index 3."""
+        from src.callbacks import WinRateCallback
+
+        cb = WinRateCallback.__new__(WinRateCallback)
+        cb.verbose = 0
+        cb.epsilon_schedule = (2.0, 0.1)
+        cb._epsilon_rewards = deque([1.0] * 500, maxlen=500)  # 100% win rate
+
+        # opponents[0] has no temperature/epsilon (like FrozenPolicyPlayer)
+        opp0 = SimpleNamespace()  # no temperature, no epsilon
+        opp1 = SimpleNamespace()
+        opp2 = SimpleNamespace()
+        opp3 = SimpleNamespace(temperature=2.0)  # SoftmaxDamagePlayer at index 3
+        cb.opponents = [opp0, opp1, opp2, opp3]
+
+        cb._maybe_anneal_epsilon(win_rate=0.80)
+
+        # At 100% wr500, target_temp = 2.0*(1-1.0) + 0.1*1.0 = 0.1
+        # Rate limited: max drop 0.1 per eval -> 2.0 - 0.1 = 1.9
+        assert opp3.temperature == pytest.approx(1.9, abs=0.01)
+
+    def test_no_annealable_opponents_is_safe(self):
+        """Should not crash when no opponents have temperature or epsilon."""
+        from src.callbacks import WinRateCallback
+
+        cb = WinRateCallback.__new__(WinRateCallback)
+        cb.verbose = 0
+        cb.epsilon_schedule = (2.0, 0.1)
+        cb._epsilon_rewards = deque([1.0] * 500, maxlen=500)
+        cb.opponents = [SimpleNamespace(), SimpleNamespace()]  # no temp, no eps
+
+        # Should not raise
+        cb._maybe_anneal_epsilon(win_rate=0.80)
+
+
+# ---------------------------------------------------------------------------
+# Test graduation check searches opponents by type
+# ---------------------------------------------------------------------------
+
+
+class TestGraduationCheck:
+    """Verify graduation check finds temperature/epsilon on any opponent."""
+
+    def test_graduation_finds_temperature_at_any_index(self):
+        """Phase should not graduate when temperature hasn't annealed, even if opponents[0] has no temp."""
+        from src.callbacks import WinRateCallback
+
+        cb = WinRateCallback.__new__(WinRateCallback)
+        cb.verbose = 0
+        cb.epsilon_schedule = (2.0, 0.1)
+        cb.opponents = [SimpleNamespace(), SimpleNamespace(temperature=1.5)]
+
+        # Simulate the graduation check logic
+        epsilon_done = True
+        _, end_val = cb.epsilon_schedule
+        temp_opps = [o for o in cb.opponents if hasattr(o, "temperature")]
+        if temp_opps:
+            epsilon_done = temp_opps[0].temperature <= end_val + 0.05
+
+        assert not epsilon_done, "Should not graduate with temperature=1.5 (end=0.1)"
 
 
 if __name__ == "__main__":

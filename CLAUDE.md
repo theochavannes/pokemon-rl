@@ -99,7 +99,11 @@ runs/              # Training runs (gitignored except logs)
 PLAN.md            # 6-phase implementation roadmap
 ```
 
-The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 421-dim float32 observation space, shaped rewards (fainted=0.5, hp=0.5, status=0.1, victory=3.0), and action masking. All Pokemon are forced to level 100 in Showdown for training consistency.
+The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 928-dim float32 observation space, shaped rewards (fainted=0.5, victory=1.0), and action masking. All Pokemon are forced to level 100 in Showdown for training consistency.
+
+## Observation Space Changes — IMPORTANT
+
+`obs_transfer.py` zero-pads new dimensions assuming they are APPENDED at the end of the vector. If you change the obs space by inserting features in the middle (e.g., expanding per-move features from 5→10), existing checkpoints become INCOMPATIBLE — the feature positions shift and the model's learned weights map to wrong inputs. In that case, **do NOT use obs_transfer** — retrain BC from scratch with the new obs shape instead. Only use obs_transfer when strictly appending new dims at the end.
 
 Env stack: `Gen1Env → SingleAgentWrapper → SB3Wrapper → Monitor → DummyVecEnv → MaskablePPO`
 

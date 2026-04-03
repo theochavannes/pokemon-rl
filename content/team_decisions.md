@@ -234,3 +234,137 @@ PPO was eroding the BC policy — BestMv% dropped from 82% to 64% over 130K step
 Plus KL penalty against BC policy to prevent forgetting, and BC regression tests.
 
 Full ranked list of 35 ideas in notes/panel4_full_conversation.md
+
+---
+
+## 2026-04-03 — Sprint 3A: Mixed League Implementation
+
+### The Shift: Sequential Curriculum → Simultaneous League
+
+**Before (4 phases):** Random → RandomAttacker → SoftmaxDamage → Mixed+Self. Each phase trains against one opponent type until graduation, then moves on. Problem: skills learned in one phase erode in the next (catastrophic forgetting). The agent beats Random, then forgets how to play once it faces MaxDamage.
+
+**After (1 phase, 4 envs):** All opponents every rollout.
+
+| Env | Opponent | What It Tests |
+|-----|----------|--------------|
+| 0 | FrozenPolicyPlayer (BC warm-start) | Self-play — can it beat itself? |
+| 1 | MaxDamagePlayer (pure) | Raw damage output |
+| 2 | TypeMatchupPlayer (pure) | Type-aware switching |
+| 3 | SoftmaxDamagePlayer (temp 2.0→0.1) | Smooth difficulty ramp |
+
+### Anti-Forgetting: Conservative Clipping
+`clip_range` lowered from 0.2 to 0.1. This is a well-known trick from RLHF literature (InstructGPT used it) — acts as an implicit KL constraint, limiting how far the policy can drift per PPO update. Preserves BC knowledge without needing an explicit KL penalty term.
+
+### Self-Play Snapshots
+Every 50K steps, the current model is frozen as the new self-play opponent and saved to `league/snapshot_NNNN.zip`. This builds a library of past selves for potential future fictitious self-play.
+
+### Per-Opponent Win Rate Tracking
+New TensorBoard metrics: `train/wr_SelfPlay`, `train/wr_MaxDmg`, `train/wr_TypeMatch`, `train/wr_SoftmaxDmg`. Also printed in console eval lines. Critical for diagnosing whether the agent is improving broadly or just beating one opponent type.
+
+### Expanded Team
+Sprint 3A assembled the largest team yet: core 11 agents plus 5 new specialists (second code reviewer, academic RL expert, DeepMind RL expert, staff engineer, test engineer). 16 experts total for 4 files changed.
+
+---
+
+## 2026-04-03 — Critical Bug: Silent Forfeit on Every Heuristic Game
+
+### The Bug
+First mixed_league training run (run_036) showed 25% win rate, 9-turn averages, 0% voluntary switches. Replays revealed the agent was forfeiting every game against heuristic opponents (envs 1-3). Only self-play (env 0) played real games.
+
+### Root Cause
+poke-env's `SinglesEnv.order_to_action()` validates opponent orders with `strict=True` by default. When a heuristic opponent's chosen move order doesn't match `battle.valid_orders` (due to battle state timing), it raises `ValueError`. Our `SB3Wrapper.step()` catches ValueError and calls `reset()` — which forfeits the current battle.
+
+FrozenPolicyPlayer (env 0) was immune because it uses `strict=False` internally for its own order conversion.
+
+### Fix
+Pass `strict=False` to `Gen1Env` constructor. Invalid opponent orders now fall back to a random valid move instead of crashing the battle.
+
+### Monitoring Added
+- `SB3Wrapper` now tracks `desync_count` and `step_count`
+- `WinRateCallback` reports desync stats in eval lines and TensorBoard
+- Each desync logs a WARNING with the specific error message
+
+### Lesson
+Silent error handling that "recovers" by forfeiting is worse than crashing. The training ran 24K steps of garbage data with no indication anything was wrong. The win rate (25%) looked plausible for a new run. Without checking replays, this could have burned hours of GPU time.
+
+---
+
+## 2026-04-03 — PPO Cannot Learn Switching (Post-Mortem)
+
+### Evidence
+| Run | Steps | Vol.Switch% | BestMv% trend | clip_range | Switch bias |
+|-----|-------|-------------|---------------|------------|-------------|
+| run_037 | 68K | 0.0% | 89→85% (eroding) | 0.1 | -1.37 (BC default) |
+| run_038 | 70K | 0.0% | 90→85% (eroding) | 0.2 | -0.69 (halved) |
+
+### Root Cause Analysis
+1. **Reward signal:** Switching gives 0.0 immediate reward. Benefit is 3-10 turns delayed. Value function (ExplVar=0.2) can't bridge the gap.
+2. **BC bias:** MaxDamagePlayer never switches → BC learned -1.37 switch bias → PPO can't overcome it even with clip_range=0.2.
+3. **No exploration pressure:** ent_coef=0.01 is too low to force random switches. Higher entropy would degrade move quality without targeted switching improvement.
+
+### Decision: Re-do BC with a Switching Teacher
+Pure RL cannot discover switching from the current reward signal. Need to teach switching through imitation, then let PPO refine.
+
+Approach: Build a competitive-informed heuristic that combines strong move selection with strategic switching decisions. Generate BC data, retrain, then resume mixed league PPO with the new warm-start.
+
+### Key Insight
+This matches how all successful game AIs work: supervised pre-training on expert data → RL fine-tuning. The pre-training establishes the behavioral repertoire. If the expert data lacks a skill, RL alone won't discover it.
+
+### Future: Human Replay Data
+Showdown has a public replay API (replay.pokemonshowdown.com). Thousands of rated Gen 1 battles with real switching decisions. Would need a parsing pipeline to convert replay logs into (observation, action) pairs for BC. Significant engineering effort but unlimited expert-quality data. Bookmarked for if the heuristic teacher approach doesn't work.
+
+---
+
+## 2026-04-03 — Observation Space Gap: Agent Can't See Move Effects
+
+### The Problem
+Move features are: base_power, type, PP, effectiveness, accuracy. All status moves (Thunder Wave, Swords Dance, Toxic, Recover) appear as "0bp, type X, 100% acc" — indistinguishable from each other and indistinguishable from useless moves like Splash. The agent has zero reason to ever use a status move.
+
+This is a fundamental ceiling: even perfect RL training cannot teach the agent to use Thunder Wave if the observation gives it no way to know Thunder Wave paralyzes.
+
+### Missing Features (prioritized by competitive impact)
+
+**Tier 1 — Must have:**
+- Move category (physical/special/status): agent can't distinguish attack types
+- Status effect type (paralyze/poison/boost/heal/other): agent can't value status moves
+- Speed comparison: who goes first determines the entire turn
+
+**Tier 2 — Important:**
+- Own/opp alive counts: game state awareness
+- Move priority flag: Quick Attack, Counter
+
+**Tier 3 — Nice to have:**
+- Volatile status (confusion, leech seed, substitute, reflect)
+- Recharge/charging state (Hyper Beam, Fly)
+- Trapping state (Wrap/Bind)
+
+### Impact
+Tier 1 adds ~107 dims (421 -> 528). Breaking change for existing checkpoints but obs_transfer.py handles expansion.
+
+### Decision
+Implemented: expanded 421->704 in sprint 3A. But run_043 showed same plateau — agent never learned to use new features because BC teacher doesn't use status moves and [64,64] NN can't process 704 dims effectively. Led to second expansion (see below).
+
+---
+
+## 2026-04-03 — Obs Space + NN Architecture Overhaul (Expert Panel)
+
+### Panel: 2 RL Researchers + 2 Smogon Competitive RBY Players
+
+**Additional move features needed (4 per move):**
+- secondary_status_chance: Body Slam 30% para, Blizzard 10% freeze (PERMANENT in Gen 1)
+- recoil: Take Down 25%, Double-Edge 25%
+- self_destruct: Explosion/Self-Destruct kill your own mon
+- fixed_damage: Seismic Toss = level damage (always 100), shows as 0bp otherwise
+
+Obs: 704 -> 928 dims (14 features per move slot).
+
+**NN architecture upgrade:**
+- [64,64] shared extractor (63K params) -> [256,128] separate pi/vf (~300K params)
+- batch_size 64 -> 128 for gradient stability with larger network
+- First layer was bottlenecking: 704+ features squeezed through 64 neurons
+
+**SmartHeuristicPlayer updated to use status moves:**
+Without status move demonstrations in BC data, the new obs features are noise. Teacher updated to use Thunder Wave, Swords Dance, Recover, Toxic.
+
+### Key Insight from Smogon Players
+Secondary effects dominate Gen 1. Body Slam (85bp + 30% para) > Strength (100bp) in nearly every situation. Blizzard (120bp + 10% PERMANENT freeze) is the best move in the game. Without encoding these probabilities, the agent can never learn why pros prefer these moves.
