@@ -368,3 +368,40 @@ Without status move demonstrations in BC data, the new obs features are noise. T
 
 ### Key Insight from Smogon Players
 Secondary effects dominate Gen 1. Body Slam (85bp + 30% para) > Strength (100bp) in nearly every situation. Blizzard (120bp + 10% PERMANENT freeze) is the best move in the game. Without encoding these probabilities, the agent can never learn why pros prefer these moves.
+
+---
+
+## 2026-04-03 — Sprint 5: Observation Completeness (928 → 1222 dims)
+
+### Changes (9 steps, all implemented)
+
+**Per-move features expanded (14 → 19 features per move):**
+1. **secondary_effect_type**: What the secondary does, not just the chance. Body Slam → PAR(0.8), Blizzard → FRZ(1.0), Psychic → stat drop(-0.17). Agent can now distinguish moves by their side effects.
+2. **One-hot category**: Replaced single float (0.0/0.5/1.0) with [is_physical, is_special]. Status = [0,0]. Removes false ordering between categories.
+3. **Separate heal/drain**: Were combined into one float. Now heal (Recover=0.5) and drain (Mega Drain=0.5) are distinct — they work completely differently.
+4. **Trapping flag**: Wrap/Bind/Clamp/Fire Spin = 1.0. These prevent ALL opponent actions in Gen 1 — one of the most broken mechanics.
+5. **Status immunity**: Target's type blocks this status? Toxic vs Poison = immune. Burn vs Fire = immune. Agent no longer wastes turns on doomed status moves.
+
+**Own active move extras (+4 dims):**
+6. **target_statused**: Is the opponent already statused? Prevents wasting Thunder Wave on already-paralyzed mons.
+
+**Global features (+10 dims):**
+7. **Volatile status (8)**: Substitute, Reflect, Light Screen, Confusion, Leech Seed — for both own and opponent.
+8. **Opponent status move threat (1)**: Has the opponent revealed status moves? Increases switching urgency.
+9. **Toxic escalation counter (1)**: How long Toxic has been ticking (0-15 → 0-1). Determines healing urgency.
+
+### Dimension Breakdown
+| Section | Old | New | Delta |
+|---------|-----|-----|-------|
+| Own moves | 56 | 80 | +24 |
+| Own bench | 390 | 510 | +120 |
+| Opp bench | 390 | 510 | +120 |
+| Opp revealed | 56 | 76 | +20 |
+| Global | 5 | 15 | +10 |
+| **Total** | **928** | **1222** | **+294** |
+
+### SmartHeuristicPlayer Updated
+Added `_is_status_immune()` check — the teacher no longer attempts Toxic on Poison types or Burn on Fire types. BC data quality improves.
+
+### Breaking Change
+Mid-vector feature insertion. All existing checkpoints incompatible. Must retrain BC from scratch.

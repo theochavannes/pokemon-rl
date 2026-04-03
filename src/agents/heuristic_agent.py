@@ -320,10 +320,32 @@ def _is_status_move(move) -> bool:
     return move.category == MoveCategory.STATUS
 
 
+def _is_status_immune(move, target) -> bool:
+    """Check if target's type makes it immune to this move's status effect (Gen 1 rules)."""
+    if not move.status:
+        return False
+    status = str(move.status).upper()
+    type_names = set()
+    for t in [target.type_1, target.type_2]:
+        if t is not None:
+            type_names.add(t.name.upper() if hasattr(t, "name") else str(t).upper())
+    if "PSN" in status or "TOX" in status:
+        return "POISON" in type_names
+    if "BRN" in status:
+        return "FIRE" in type_names
+    if "FRZ" in status:
+        return "ICE" in type_names
+    return False
+
+
 def _should_use_status(move, battle) -> bool:
     """Decide if a status move is worth using right now."""
     opp = battle.opponent_active_pokemon
     own = battle.active_pokemon
+
+    # Don't use status moves if target is immune due to type
+    if _is_status_immune(move, opp):
+        return False
 
     # Thunder Wave / Stun Spore: paralyze if opponent isn't already statused
     # and opponent is faster (paralyze to gain speed advantage)
