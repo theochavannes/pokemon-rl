@@ -126,3 +126,49 @@ Removed `level` feature (14 dims total: 1 per Pokemon slot). All Pokemon forced 
 
 ### Testing
 Added 23 unit tests covering: `embed_battle` shape/dtype/values, `_expected_damage`, `SoftmaxDamagePlayer` temperature behavior, `_EpsilonMixin` blend, `obs_transfer` weight expansion, reward shaping decay, and integration smoke tests.
+
+---
+
+## 2026-04-02 — Git Cleanup & Developer Tooling Overhaul
+
+### Git Cleanup
+Removed all replay HTML files from tracking (10 files, ~150KB). Expanded `.gitignore` to cover: IDE files (`.idea/`, `.vscode/`), model checkpoints (`*.pt`, `*.pth`, `*.zip`), pytest cache, W&B tracking dirs, all of `runs/`, and meta-prompts. Previously only `runs/*/models/logs/replays/` were ignored — run metadata (`run_info.json`, `training_log.md`) was leaking into `git status`.
+
+### Tooling Decisions
+| Tool | Replaces | Why |
+|------|----------|-----|
+| **Ruff** | Pylint + Black + isort + Flake8 | Single tool, 10-100x faster, more rules, auto-fix |
+| **Pre-commit hooks** | Nothing (had none) | Block bad commits before they enter history |
+| **GitHub Actions CI** | pylint.yml (lint only) | Lint + test in parallel, pip caching, proper Ruff action |
+| **CodeRabbit** | No code review | AI reviewer on every PR, free for public repos |
+| **Dependabot** | Manual dep updates | Auto-PRs for security vulnerabilities |
+| **Claude Code hooks** | CLAUDE.md formatting instructions | Deterministic auto-format on every AI edit |
+| **Context7 MCP** | Claude's training data | Real-time docs for poke-env, SB3, PyTorch |
+
+### What We Chose NOT To Add (and why)
+- **W&B** — requires modifying training code, deferred to when we're ready for a training session
+- **mypy/type checking** — valuable but high effort to retrofit; will add incrementally
+- **Docker** — overkill for a solo research project running locally
+- **MkDocs** — documentation site unnecessary until we share/publish
+- **pixi/uv** — conda works fine for CUDA deps, no reason to switch mid-project
+
+---
+
+## 2026-04-02 — Logging & Observability Overhaul
+
+### Problem
+Zero Python logging — everything was bare `print()`. No log files written to disk. If the terminal closed during a run, all training output was lost. poke-env's internal logger emitted per-Pokemon warnings (e.g. about Vaporeon) hundreds of times per run, polluting the console.
+
+### Solution
+| Component | Before | After |
+|-----------|--------|-------|
+| **Console output** | `print()` only | `print()` + `logging.Logger` (dual output) |
+| **File logs** | None | `runs/run_NNN/logs/training.log` — full DEBUG-level history |
+| **Duplicate suppression** | None | `DuplicateFilter` — after 3 repeats, silences until a new message, then emits "suppressed N duplicates" |
+| **poke-env noise** | `log_level=25` (between INFO/WARNING) | `log_level=40` (ERROR only) + WARNING filter on poke-env's Python logger |
+| **Structured eval logs** | Formatted for humans only | `EVAL step=X vs=Y win_rate=Z ...` format — parseable for post-run analysis |
+
+### Key Design Decisions
+- **Dual output (print + logger):** Kept existing `print()` for console readability (progress bars, Unicode). Logger writes structured lines to file. Console uses DuplicateFilter(max=3), file uses DuplicateFilter(max=5) for more detail.
+- **Heartbeats at DEBUG level:** Per-rollout step updates go to file only (DEBUG), not console, reducing noise during long runs.
+- **poke-env raised to ERROR:** All useful battle info (win/loss, turns, actions) is already tracked by WinRateCallback. poke-env's INFO/WARNING messages about individual Pokemon are noise during training.
