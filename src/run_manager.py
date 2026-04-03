@@ -15,12 +15,13 @@ Auto-resume logic:
 """
 
 import json
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
 
-
 RUNS_DIR = Path("runs")
+log = logging.getLogger("pokemon_rl.run_manager")
 
 
 class RunManager:
@@ -90,6 +91,7 @@ class RunManager:
         if epsilon is not None:
             progress["epsilon"] = epsilon
         self._update_info({"progress": progress})
+        log.debug("Progress saved: phase=%s step=%d eps=%s", phase_name, timesteps, epsilon)
 
     def load_progress(self) -> dict:
         """Load saved progress. Returns {} if no progress saved."""
@@ -98,6 +100,7 @@ class RunManager:
 
     def mark_complete(self) -> None:
         self._update_info({"status": "complete", "completed_at": datetime.now().isoformat()})
+        log.info("%s marked complete", self.run_id)
         print(f"  [{self.run_id}] marked complete")
 
     # ------------------------------------------------------------------

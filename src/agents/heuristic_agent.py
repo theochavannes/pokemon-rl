@@ -24,9 +24,7 @@ def _expected_damage(move, opponent) -> float:
     if move.base_power == 0:
         return 0.0
     try:
-        effectiveness = move.type.damage_multiplier(
-            opponent.type_1, opponent.type_2, type_chart=_GEN1_TYPE_CHART
-        )
+        effectiveness = move.type.damage_multiplier(opponent.type_1, opponent.type_2, type_chart=_GEN1_TYPE_CHART)
     except Exception:
         effectiveness = 1.0
     return move.base_power * effectiveness
@@ -44,7 +42,7 @@ def _type_advantage(pokemon, opponent) -> float:
             try:
                 mult = atk_type.damage_multiplier(def_type, None, type_chart=_GEN1_TYPE_CHART)
                 score -= mult  # lower mult = better resistance
-            except Exception:
+            except Exception:  # noqa: S110
                 pass
     return score
 
@@ -59,6 +57,7 @@ def _type_advantage(pokemon, opponent) -> float:
 # More realistic than pure Random (which switches 60% due to action space)
 # ---------------------------------------------------------------------------
 
+
 class RandomAttackerPlayer(Player):
     def choose_move(self, battle):
         if battle.available_moves and _random.random() < 0.95:
@@ -71,6 +70,7 @@ class RandomAttackerPlayer(Player):
 # High temp = near-uniform, low temp = near-argmax (MaxDamage)
 # Switches randomly ~10% of turns. Temperature is mutable for annealing.
 # ---------------------------------------------------------------------------
+
 
 class SoftmaxDamagePlayer(Player):
     def __init__(self, temperature: float = 2.0, **kwargs):
@@ -98,23 +98,21 @@ class SoftmaxDamagePlayer(Player):
             return self.create_order(chosen)
 
         if battle.available_switches:
-            return self.create_order(
-                max(battle.available_switches, key=lambda p: p.current_hp_fraction)
-            )
+            return self.create_order(max(battle.available_switches, key=lambda p: p.current_hp_fraction))
         return self.choose_random_move(battle)
 
 
 class MaxDamagePlayer(Player):
     def choose_move(self, battle):
         if battle.available_moves:
-            return self.create_order(max(
-                battle.available_moves,
-                key=lambda m: _expected_damage(m, battle.opponent_active_pokemon),
-            ))
-        if battle.available_switches:
             return self.create_order(
-                max(battle.available_switches, key=lambda p: p.current_hp_fraction)
+                max(
+                    battle.available_moves,
+                    key=lambda m: _expected_damage(m, battle.opponent_active_pokemon),
+                )
             )
+        if battle.available_switches:
+            return self.create_order(max(battle.available_switches, key=lambda p: p.current_hp_fraction))
         return self.choose_random_move(battle)
 
 
@@ -122,6 +120,7 @@ class MaxDamagePlayer(Player):
 # TypeMatchupPlayer — picks best type-effective move, switches if walled
 # Skill tested: agent faces a type-aware opponent that won't stay in bad matchups
 # ---------------------------------------------------------------------------
+
 
 class TypeMatchupPlayer(Player):
     def choose_move(self, battle):
@@ -144,9 +143,12 @@ class TypeMatchupPlayer(Player):
 
         # Fall through: use any available move
         if battle.available_moves:
-            return self.create_order(max(
-                battle.available_moves, key=lambda m: _expected_damage(m, opp),
-            ))
+            return self.create_order(
+                max(
+                    battle.available_moves,
+                    key=lambda m: _expected_damage(m, opp),
+                )
+            )
 
         return self.choose_random_move(battle)
 
@@ -155,6 +157,7 @@ class TypeMatchupPlayer(Player):
 # StallPlayer — prioritizes status moves, switches to bulkiest Pokemon
 # Skill tested: agent must learn to break through status + bulk
 # ---------------------------------------------------------------------------
+
 
 class StallPlayer(Player):
     def choose_move(self, battle):
@@ -168,15 +171,16 @@ class StallPlayer(Player):
 
         # Otherwise pick highest damage move
         if battle.available_moves:
-            return self.create_order(max(
-                battle.available_moves, key=lambda m: _expected_damage(m, opp),
-            ))
+            return self.create_order(
+                max(
+                    battle.available_moves,
+                    key=lambda m: _expected_damage(m, opp),
+                )
+            )
 
         # Switch to bulkiest (highest HP) Pokemon
         if battle.available_switches:
-            return self.create_order(
-                max(battle.available_switches, key=lambda p: p.current_hp_fraction)
-            )
+            return self.create_order(max(battle.available_switches, key=lambda p: p.current_hp_fraction))
 
         return self.choose_random_move(battle)
 
@@ -185,6 +189,7 @@ class StallPlayer(Player):
 # AggressiveSwitcher — switches to type advantage aggressively, then attacks
 # Skill tested: agent must handle frequent switching and punish it
 # ---------------------------------------------------------------------------
+
 
 class AggressiveSwitcher(Player):
     def choose_move(self, battle):
@@ -200,15 +205,15 @@ class AggressiveSwitcher(Player):
 
         # Attack with best move
         if battle.available_moves:
-            return self.create_order(max(
-                battle.available_moves,
-                key=lambda m: _expected_damage(m, opp),
-            ))
+            return self.create_order(
+                max(
+                    battle.available_moves,
+                    key=lambda m: _expected_damage(m, opp),
+                )
+            )
 
         if battle.available_switches:
-            return self.create_order(
-                max(battle.available_switches, key=lambda p: p.current_hp_fraction)
-            )
+            return self.create_order(max(battle.available_switches, key=lambda p: p.current_hp_fraction))
 
         return self.choose_random_move(battle)
 
@@ -216,6 +221,7 @@ class AggressiveSwitcher(Player):
 # ---------------------------------------------------------------------------
 # Epsilon wrappers — per-turn epsilon-greedy for any opponent
 # ---------------------------------------------------------------------------
+
 
 class _EpsilonMixin:
     """Mixin: with probability epsilon, play as frozen self; otherwise play strategy.
@@ -235,6 +241,7 @@ class _EpsilonMixin:
 
     def load_selfplay_model(self, path: str) -> None:
         from sb3_contrib import MaskablePPO
+
         self._frozen_model = MaskablePPO.load(path)
 
     def swap_model(self, path: str) -> None:
@@ -246,7 +253,9 @@ class _EpsilonMixin:
             return self.choose_random_move(battle)
         import numpy as np
         from poke_env.environment.singles_env import SinglesEnv
+
         from src.env.gen1_env import embed_battle
+
         obs = embed_battle(battle)
         mask = np.array(SinglesEnv.get_action_mask(battle), dtype=bool)
         action, _ = self._frozen_model.predict(obs, action_masks=mask, deterministic=False)
@@ -261,11 +270,14 @@ class _EpsilonMixin:
 class EpsilonMaxDamagePlayer(_EpsilonMixin, MaxDamagePlayer):
     pass
 
+
 class EpsilonTypeMatchupPlayer(_EpsilonMixin, TypeMatchupPlayer):
     pass
 
+
 class EpsilonStallPlayer(_EpsilonMixin, StallPlayer):
     pass
+
 
 class EpsilonAggressiveSwitcher(_EpsilonMixin, AggressiveSwitcher):
     pass

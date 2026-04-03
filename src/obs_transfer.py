@@ -20,8 +20,6 @@ The resulting model can be passed directly to model.learn().
 """
 
 import torch
-import numpy as np
-from pathlib import Path
 
 
 def load_with_expanded_obs(
@@ -29,7 +27,7 @@ def load_with_expanded_obs(
     new_obs_dim: int,
     env,
     ppo_kwargs: dict,
-) :
+):
     """
     Load an old MaskablePPO checkpoint into a new model with a larger observation space.
 
@@ -55,14 +53,14 @@ def load_with_expanded_obs(
     if old_obs_dim == new_obs_dim:
         print(f"  [Transfer] obs_dim unchanged ({old_obs_dim}). Loading directly.")
         return MaskablePPO.load(
-            old_path, env=env,
+            old_path,
+            env=env,
             **{k: v for k, v in ppo_kwargs.items() if k not in ("verbose",)},
         )
 
     if new_obs_dim < old_obs_dim:
         raise ValueError(
-            f"new_obs_dim ({new_obs_dim}) < old_obs_dim ({old_obs_dim}). "
-            "Observation space can only grow, not shrink."
+            f"new_obs_dim ({new_obs_dim}) < old_obs_dim ({old_obs_dim}). Observation space can only grow, not shrink."
         )
 
     added = new_obs_dim - old_obs_dim
@@ -127,6 +125,7 @@ def load_with_expanded_obs(
 def obs_dim_of(model_path: str) -> int:
     """Return the observation dimension of a saved checkpoint."""
     from sb3_contrib import MaskablePPO
+
     m = MaskablePPO.load(model_path)
     return m.observation_space.shape[0]
 

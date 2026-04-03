@@ -1,0 +1,64 @@
+# NOTE: This is a reference file to compare with .github/workflows/ci.yml
+# It is NOT active — CircleCI is not connected to this repo.
+# It does the exact same thing as our GitHub Actions CI, just in CircleCI syntax.
+
+version: 2.1
+
+# "orbs" are CircleCI's reusable plugins (like GitHub Actions' "uses:")
+orbs:
+  python: circleci/python@2.1
+
+jobs:
+  lint:
+    docker:
+      # GitHub Actions says "runs-on: ubuntu-latest"
+      # CircleCI says "use this Docker image"
+      - image: cimg/python:3.11
+    steps:
+      # GitHub Actions: "uses: actions/checkout@v4"
+      # CircleCI: built-in "checkout" step
+      - checkout
+      - run:
+          name: Install Ruff
+          command: pip install ruff
+      # GitHub Actions has a dedicated ruff-action
+      # CircleCI: you just run the commands yourself
+      - run:
+          name: Lint
+          command: ruff check .
+      - run:
+          name: Check formatting
+          command: ruff format --check .
+
+  test:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      # GitHub Actions: "cache: pip" (one line, automatic)
+      # CircleCI: explicit restore/save cache (more verbose but more control)
+      - restore_cache:
+          keys:
+            - pip-{{ checksum "pyproject.toml" }}
+      - run:
+          name: Install dependencies
+          command: |
+            pip install --extra-index-url https://download.pytorch.org/whl/cpu -e ".[dev]"
+      - save_cache:
+          key: pip-{{ checksum "pyproject.toml" }}
+          paths:
+            - ~/.cache/pip
+      - run:
+          name: Run tests
+          command: pytest tests/ -v --timeout=30 --tb=short
+
+# "workflows" define the order jobs run in
+# GitHub Actions uses "needs: lint" inside the job
+# CircleCI defines it separately here
+workflows:
+  ci:
+    jobs:
+      - lint
+      - test:
+          requires:
+            - lint

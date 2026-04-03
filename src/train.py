@@ -25,6 +25,8 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 os.chdir(_PROJECT_ROOT)
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+import logging
+
 import torch
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import CheckpointCallback
@@ -32,8 +34,11 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from src.callbacks import WinRateCallback
 from src.env.gen1_env import make_env
-from src.obs_transfer import load_with_expanded_obs, is_compatible
+from src.logging_config import setup_logging
+from src.obs_transfer import is_compatible, load_with_expanded_obs
 from src.run_manager import RunManager
+
+log = logging.getLogger("pokemon_rl.train")
 
 # ---------------------------------------------------------------------------
 # Config
@@ -43,11 +48,11 @@ BATTLE_FORMAT = "gen1randombattle"
 N_ENVS = 4
 
 PPO_KWARGS = dict(
-    policy="MlpPolicy",           # [64, 64] MLP — tested [128,128] and [256,256], both worse
+    policy="MlpPolicy",  # [64, 64] MLP — tested [128,128] and [256,256], both worse
     n_steps=2048,
     batch_size=64,
     n_epochs=10,
-    gamma=0.99,                    # Effective horizon ~100 turns (avg game ~50 turns)
+    gamma=0.99,  # Effective horizon ~100 turns (avg game ~50 turns)
     gae_lambda=0.95,
     clip_range=0.2,
     learning_rate=3e-4,
@@ -78,7 +83,7 @@ CURRICULUM = [
         target_wr=0.70,
         max_steps=400_000,
         shaping_factor=1.0,
-        epsilon_start=2.0,   # temperature: 2.0 = soft, anneals to 0.1 = near-argmax
+        epsilon_start=2.0,  # temperature: 2.0 = soft, anneals to 0.1 = near-argmax
         epsilon_end=0.1,
     ),
     dict(
@@ -99,9 +104,7 @@ def _prevent_sleep() -> None:
     ES_CONTINUOUS = 0x80000000
     ES_SYSTEM_REQUIRED = 0x00000001
     ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
-    atexit.register(
-        lambda: ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
-    )
+    atexit.register(lambda: ctypes.windll.kernel32.SetThreadExecutionState(0x80000000))
     print("Sleep prevention: ON")
 
 
@@ -118,6 +121,9 @@ def main(new_run: bool = False) -> None:
     os.makedirs(run.models_dir, exist_ok=True)
     os.makedirs(run.logs_dir, exist_ok=True)
 
+    setup_logging(log_dir=run.logs_dir)
+    log.info("Starting %s (curriculum training)", run.run_id)
+
     resume_path = run.latest_checkpoint()
     progress = run.load_progress()
     model = None
@@ -130,7 +136,7 @@ def main(new_run: bool = False) -> None:
             continue
         replay_dir = run.replays_dir(f"phase_{phase['name'].lower()}")
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  {run.run_id} — Phase {phase['name']}: vs {phase['phase_label']}")
         shaping = phase.get("shaping_factor", 1.0)
         epsilon_start = phase.get("epsilon_start")
@@ -147,21 +153,24 @@ def main(new_run: bool = False) -> None:
             remaining_steps = max(phase["max_steps"] - done, 0)
             print(f"  Resuming from step {done:,} — {remaining_steps:,} steps remaining")
 
-        print(f"  Target: {phase['target_wr']*100:.0f}%  |  Cap: {remaining_steps:,} steps (~{remaining_steps//75:,} battles)")
+        print(
+            f"  Target: {phase['target_wr'] * 100:.0f}%  |  Cap: {remaining_steps:,} steps (~{remaining_steps // 75:,} battles)"
+        )
         print(f"  Reward shaping: {shaping:.0%}")
         if epsilon_start is not None:
             print(f"  Opponent ε: {epsilon_start} → {phase.get('epsilon_end', 0.0)} (anneals on win rate)")
         selfplay_path = str(Path(run.models_dir) / "selfplay_frozen") if phase.get("selfplay") else None
         if selfplay_path:
-            print(f"  Self-play: ON (frozen opponent updated every 200 battles)")
+            print("  Self-play: ON (frozen opponent updated every 200 battles)")
         print(f"  Replays → {replay_dir}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Save current best as initial frozen opponent for self-play
         if selfplay_path:
             best = Path(run.models_dir) / "best_model.zip"
             if best.exists():
                 from sb3_contrib import MaskablePPO as _PPO
+
                 _PPO.load(str(best.with_suffix(""))).save(selfplay_path)
             elif model is not None:
                 model.save(selfplay_path)
@@ -180,17 +189,15 @@ def main(new_run: bool = False) -> None:
             for i in range(N_ENVS)
         ]
         # DummyVecEnv when we need opponent access (epsilon annealing), SubprocVecEnv otherwise
-        if epsilon_start is not None or N_ENVS == 1:
-            env = DummyVecEnv(env_fns)
-        else:
-            env = SubprocVecEnv(env_fns)
+        env = DummyVecEnv(env_fns) if epsilon_start is not None or N_ENVS == 1 else SubprocVecEnv(env_fns)
 
         if model is None:
             if resume_path:
                 if is_compatible(resume_path, env.observation_space.shape[0]):
                     print(f"  Resuming from {resume_path}")
                     model = MaskablePPO.load(
-                        resume_path, env=env,
+                        resume_path,
+                        env=env,
                         **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
                     )
                 else:
@@ -206,9 +213,11 @@ def main(new_run: bool = False) -> None:
                 # Bias policy toward moves (actions 6-9) over switches (actions 0-5).
                 # The bias is a learned parameter — PPO will adjust it naturally.
                 with torch.no_grad():
-                    model.policy.action_net.bias.data[:6] -= 2.0   # penalize switches
-                    model.policy.action_net.bias.data[6:] += 2.0   # boost moves
-                    print(f"  Logit bias: switches={model.policy.action_net.bias.data[:6].mean():.1f}, moves={model.policy.action_net.bias.data[6:].mean():.1f}")
+                    model.policy.action_net.bias.data[:6] -= 2.0  # penalize switches
+                    model.policy.action_net.bias.data[6:] += 2.0  # boost moves
+                    print(
+                        f"  Logit bias: switches={model.policy.action_net.bias.data[:6].mean():.1f}, moves={model.policy.action_net.bias.data[6:].mean():.1f}"
+                    )
         else:
             model.set_env(env)
 
@@ -220,7 +229,7 @@ def main(new_run: bool = False) -> None:
         print(f"  Action sp : {act_dim} actions (4 moves + 6 switches)")
         print(f"  Network   : {total_params:,} parameters")
         print(f"  Rollout   : {PPO_KWARGS['n_steps']} steps × {N_ENVS} env(s)")
-        print(f"  Eval every: 50 battles")
+        print("  Eval every: 50 battles")
         print()
 
         # Collect opponent refs for epsilon annealing + selfplay swap (DummyVecEnv only)

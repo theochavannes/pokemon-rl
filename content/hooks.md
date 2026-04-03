@@ -99,6 +99,23 @@ The callback that anneals the softmax temperature checked `hasattr(opp, "epsilon
 - Run with softmax opponent as "after"
 - Overlay training curves for the comparison
 
+### The Professionalization Moment — Tooling Up
+**Hook:** "We stopped coding the agent and started building the workshop."
+
+After the 10-agent audit found 5 bugs (including the dead temperature annealing), we realized the project had zero safety nets — no pre-commit hooks, no proper CI, no AI code review, no dependency management. Just a single Pylint check with half its rules disabled.
+
+**What changed:**
+- Replaced Pylint with Ruff (10-100x faster, catches more)
+- Added pre-commit hooks (auto-format, block large files — critical when one `git add .` could commit a 200MB model)
+- Modern CI pipeline (lint then test on every PR)
+- CodeRabbit AI code review (caught 5 issues on the first PR it reviewed)
+- Dependabot for automatic security updates
+- Claude Code hooks (every AI edit gets auto-formatted)
+
+**Visual:** Split screen — messy git status with untracked replays and IDE files vs clean status after cleanup. Show CodeRabbit's first review catching real issues.
+
+**Why it's good content:** Solo developer doing ML realizes they need the same tooling discipline as a team. The audience learns why these tools matter for ANY project, not just RL.
+
 ---
 
 ## Future Content Angles
@@ -178,6 +195,17 @@ The callback that anneals the softmax temperature checked `hasattr(opp, "epsilon
 - Switch rate: 28.7% of actions
 - Best move used: move_1 (21.3% of move actions)
 - **Why it matters for the video:** The agent crossed 70% win rate vs RandomPlayer at step 146,320. It heavily prefers attacking over switching — aggressive style.
+
+### The Observability Moment (2026-04-02)
+**Hook:** "We realized the training was a black box — if the terminal crashed, we lost everything."
+
+The project had zero logging infrastructure. Every training output was a bare `print()` that disappeared when the window closed. Worse, poke-env's internal logger was spamming hundreds of duplicate warnings per run about specific Pokemon (Vaporeon kept appearing). The signal was drowning in noise.
+
+**What changed:** Added proper Python logging with file output (`training.log` per run), a duplicate message filter that suppresses repeated warnings after 3 occurrences, and silenced poke-env's chatty per-battle messages. Now every eval, milestone, curriculum change, and shaping decay is recorded to disk with timestamps.
+
+**Visual:** Show a split — left side: terminal with hundreds of identical Vaporeon warnings scrolling past. Right side: clean log file with structured eval lines and "suppressed 47 duplicate messages."
+
+**Why it matters for the video:** This is the "building the workshop" arc continuing. You can't debug ML if you can't see what happened. Especially relevant when runs take hours and you come back to find something went wrong.
 
 ### ✅ Win rate crossed 75% — step 194604 (2026-04-02)
 - Avg battle length: 38.5 turns

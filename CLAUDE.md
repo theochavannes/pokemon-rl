@@ -103,6 +103,10 @@ The Python side uses poke-env to connect to the local Showdown WebSocket server.
 
 Env stack: `Gen1Env → SingleAgentWrapper → SB3Wrapper → Monitor → DummyVecEnv → MaskablePPO`
 
+## Complex Decisions
+
+When facing complex architectural decisions (reward shaping, observation space changes, training curriculum design), break the problem into steps, consider at least 2 alternatives, and compare trade-offs before recommending an approach.
+
 ## Gen 1 Mechanics to Be Aware Of
 
 - 1/256 miss chance on nominally 100%-accurate moves
