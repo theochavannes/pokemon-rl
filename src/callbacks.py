@@ -132,9 +132,8 @@ class WinRateCallback(BaseCallback):
         self._own_fainted_total: int = 0  # total own Pokemon fainted
         self._fainted_episode_count: int = 0  # episodes counted for faint stats
 
-        # Per-opponent tracking (for mixed_league: env0=SelfPlay, env1=MaxDmg, env2=TypeMatch, env3=SoftmaxDmg)
-        self._per_env_wins: list[int] = [0, 0, 0, 0]
-        self._per_env_total: list[int] = [0, 0, 0, 0]
+        # Per-opponent tracking — windowed (last 100 results per env)
+        self._per_env_results: list[deque] = [deque(maxlen=100) for _ in range(4)]
         self._per_env_labels: list[str] = ["SelfPlay", "MaxDmg", "TypeMatch", "SoftmaxDmg"]
 
     def _on_training_start(self) -> None:
@@ -212,10 +211,8 @@ class WinRateCallback(BaseCallback):
                 self._epsilon_rewards.append(reward)
 
                 # Per-opponent tracking (DummyVecEnv: env_idx maps to opponent)
-                if env_idx < len(self._per_env_total):
-                    self._per_env_total[env_idx] += 1
-                    if reward >= 0.5:
-                        self._per_env_wins[env_idx] += 1
+                if env_idx < len(self._per_env_results):
+                    self._per_env_results[env_idx].append(1.0 if reward >= 0.5 else 0.0)
 
                 # Log first 10 episodes individually so user sees something early
                 if self._total_episodes <= 10:
@@ -353,14 +350,13 @@ class WinRateCallback(BaseCallback):
         self.logger.record("train/damage_efficiency", dmg_efficiency, exclude=_tb_only)
         self.logger.record("train/mean_episode_return", mean_return, exclude=_tb_only)
         self.logger.record("train/return_std", return_std, exclude=_tb_only)
-        # Per-opponent win rates (mixed_league)
+        # Per-opponent win rates (mixed_league) — windowed last 100
         for idx, lbl in enumerate(self._per_env_labels):
-            if self._per_env_total[idx] > 0:
-                opp_wr = self._per_env_wins[idx] / self._per_env_total[idx]
+            if len(self._per_env_results[idx]) > 0:
+                opp_wr = float(np.mean(list(self._per_env_results[idx])))
                 self.logger.record(f"train/wr_{lbl}", opp_wr, exclude=_tb_only)
         # Desync tracking — how many battles ended in forfeit due to ValueError
         total_desyncs = 0
-        total_steps = 0
         if self._env and hasattr(self._env, "envs"):
             for e in self._env.envs:
                 # Navigate wrapper chain: Monitor -> SB3Wrapper
@@ -368,11 +364,10 @@ class WinRateCallback(BaseCallback):
                 while hasattr(inner, "env"):
                     if hasattr(inner, "desync_count"):
                         total_desyncs += inner.desync_count
-                        total_steps += inner.step_count
                         break
                     inner = inner.env
-        if total_steps > 0:
-            desync_rate = total_desyncs / total_steps * 100
+        desync_rate = (total_desyncs / self._total_episodes * 100) if self._total_episodes > 0 else 0.0
+        if total_desyncs > 0:
             self.logger.record("train/desync_count", total_desyncs, exclude=_tb_only)
             self.logger.record("train/desync_rate_pct", desync_rate, exclude=_tb_only)
         self.logger.dump(self.num_timesteps)
@@ -428,11 +423,11 @@ class WinRateCallback(BaseCallback):
         if self.verbose:
             bar = "█" * int(win_rate * 20) + "░" * (20 - int(win_rate * 20))
             ev_str = f"  ev={expl_var:.2f}" if not np.isnan(expl_var) else ""
-            # Per-opponent breakdown
+            # Per-opponent breakdown (windowed)
             opp_parts = []
             for idx, lbl in enumerate(self._per_env_labels):
-                if self._per_env_total[idx] > 0:
-                    opp_wr = self._per_env_wins[idx] / self._per_env_total[idx] * 100
+                if len(self._per_env_results[idx]) > 0:
+                    opp_wr = float(np.mean(list(self._per_env_results[idx]))) * 100
                     opp_parts.append(f"{lbl}={opp_wr:.0f}%")
             opp_str = f"  [{', '.join(opp_parts)}]" if opp_parts else ""
             desync_console = f"  ⚠desyncs={total_desyncs}" if total_desyncs > 0 else ""
@@ -524,11 +519,11 @@ class WinRateCallback(BaseCallback):
         """Append a row to content/training_log.md."""
         ev_str = f"{expl_var:>6.3f}" if not np.isnan(expl_var) else "   N/A"
 
-        # Per-opponent win rates
+        # Per-opponent win rates (windowed)
         opp_strs = []
         for idx, lbl in enumerate(self._per_env_labels):
-            if self._per_env_total[idx] > 0:
-                opp_wr = self._per_env_wins[idx] / self._per_env_total[idx] * 100
+            if len(self._per_env_results[idx]) > 0:
+                opp_wr = float(np.mean(list(self._per_env_results[idx]))) * 100
                 opp_strs.append(f"{lbl}={opp_wr:.0f}%")
         opp_col = ", ".join(opp_strs) if opp_strs else "N/A"
 

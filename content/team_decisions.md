@@ -244,6 +244,7 @@ Full ranked list of 35 ideas in notes/panel4_full_conversation.md
 **Before (4 phases):** Random → RandomAttacker → SoftmaxDamage → Mixed+Self. Each phase trains against one opponent type until graduation, then moves on. Problem: skills learned in one phase erode in the next (catastrophic forgetting). The agent beats Random, then forgets how to play once it faces MaxDamage.
 
 **After (1 phase, 4 envs):** All opponents every rollout.
+
 | Env | Opponent | What It Tests |
 |-----|----------|--------------|
 | 0 | FrozenPolicyPlayer (BC warm-start) | Self-play — can it beat itself? |
@@ -280,7 +281,7 @@ Pass `strict=False` to `Gen1Env` constructor. Invalid opponent orders now fall b
 
 ### Monitoring Added
 - `SB3Wrapper` now tracks `desync_count` and `step_count`
-- `WinRateCallback` reports desync stats in eval lines, TensorBoard, and training_log.md
+- `WinRateCallback` reports desync stats in eval lines and TensorBoard
 - Each desync logs a WARNING with the specific error message
 
 ### Lesson

@@ -157,6 +157,10 @@ def main(new_run: bool = False) -> None:
 
                     _PPO.load(str(bc_seed.with_suffix(""))).save(selfplay_path)
                     print("  Self-play: initialized frozen opponent from BC warm-start")
+                else:
+                    raise FileNotFoundError(
+                        "Self-play requires a model but no best_model.zip or models/bc_warmstart.zip found"
+                    )
 
         env_fns = [
             partial(
