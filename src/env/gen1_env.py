@@ -262,6 +262,8 @@ class Gen1Env(SinglesEnv):
 
     def __init__(self, shaping_factor: float = 1.0, **kwargs):
         super().__init__(**kwargs)
+        # shaping_factor kept for callback compatibility but intentionally unused
+        # in calc_reward — reward is now clean faint differential + win/loss only.
         self.shaping_factor = shaping_factor
         # PokeEnv.__init__ does not set observation_spaces — must be set by subclass.
         # __setattr__ intercepts this and wraps each value in Dict(observation, action_mask).
@@ -270,14 +272,13 @@ class Gen1Env(SinglesEnv):
     def calc_reward(self, battle) -> float:
         reward = self.reward_computing_helper(
             battle,
-            fainted_value=0.5 * self.shaping_factor,
-            hp_value=0.5 * self.shaping_factor,
-            status_value=0.1 * self.shaping_factor,
-            victory_value=3.0,
+            fainted_value=0.5,
+            hp_value=0.0,
+            status_value=0.0,
+            victory_value=1.0,
         )
         # Matchup baseline: subtract team-quality advantage from terminal reward
         # so the agent gets more credit for winning bad matchups and less for easy ones.
-        # Only applied on terminal steps (win/loss) to avoid distorting per-turn shaping.
         if battle.won or battle.lost:
             reward -= matchup_baseline(battle)
         return reward
@@ -368,7 +369,16 @@ def make_env(
         save_replays=save_replays,
     )
 
-    if opponent_type == "random_attacker":
+    if opponent_type == "random_damage":
+        from src.agents.heuristic_agent import RandomDamagePlayer
+
+        opponent = RandomDamagePlayer(
+            battle_format=battle_format,
+            account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
+            start_listening=False,
+            log_level=40,
+        )
+    elif opponent_type == "random_attacker":
         from src.agents.heuristic_agent import RandomAttackerPlayer
 
         opponent = RandomAttackerPlayer(

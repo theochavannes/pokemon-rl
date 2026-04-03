@@ -66,6 +66,25 @@ class RandomAttackerPlayer(Player):
 
 
 # ---------------------------------------------------------------------------
+# RandomDamagePlayer — picks a random MOVE (never switches voluntarily)
+# Sits between RandomPlayer (60% switch) and SoftmaxDamagePlayer (smart damage)
+# ---------------------------------------------------------------------------
+
+
+class RandomDamagePlayer(Player):
+    """Picks a random move every turn, never switches voluntarily.
+
+    Tests if the agent can learn move selection when the opponent
+    isn't also picking smart moves.
+    """
+
+    def choose_move(self, battle):
+        if battle.available_moves:
+            return self.create_order(_random.choice(battle.available_moves))
+        return self.choose_random_move(battle)
+
+
+# ---------------------------------------------------------------------------
 # SoftmaxDamagePlayer — samples moves proportional to damage^(1/temperature)
 # High temp = near-uniform, low temp = near-argmax (MaxDamage)
 # Switches randomly ~10% of turns. Temperature is mutable for annealing.

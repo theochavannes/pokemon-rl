@@ -318,6 +318,15 @@ class WinRateCallback(BaseCallback):
         mean_return = float(np.mean(list(self._episode_rewards))) if self._episode_rewards else 0.0
         return_std = float(np.std(list(self._episode_rewards))) if len(self._episode_rewards) > 1 else 0.0
 
+        # Grab SB3's PPO training metrics from the logger
+        sb3_vals = getattr(self.model.logger, "name_to_value", {})
+        expl_var = sb3_vals.get("train/explained_variance", float("nan"))
+        entropy = sb3_vals.get("train/entropy_loss", float("nan"))
+        approx_kl = sb3_vals.get("train/approx_kl", float("nan"))
+        pg_loss = sb3_vals.get("train/policy_gradient_loss", float("nan"))
+        value_loss = sb3_vals.get("train/value_loss", float("nan"))
+        clip_frac = sb3_vals.get("train/clip_fraction", float("nan"))
+
         # TensorBoard only — exclude stdout/log/json/csv on each record() call
         _tb_only = ("stdout", "log", "json", "csv")
         self.logger.record("train/win_rate", win_rate, exclude=_tb_only)
@@ -338,6 +347,9 @@ class WinRateCallback(BaseCallback):
         # Anneal opponent epsilon based on win rate
         self._maybe_anneal_epsilon(win_rate)
 
+        # Dynamic entropy: prevent death spiral by forcing exploration when stuck
+        self._maybe_adjust_entropy(win_rate)
+
         # Always log eval to file (structured for post-run analysis)
         label = self.phase_label or "opponent"
         eps_str = ""
@@ -349,7 +361,7 @@ class WinRateCallback(BaseCallback):
                 eps_str = f" opp_eps={opp.epsilon:.2f}"
         log.info(
             "EVAL step=%d vs=%s win_rate=%.3f avg_turns=%.1f best_move=%.1f%% dmg_eff=%.2f"
-            " vol_switch=%.1f%% forced_switch=%.1f%% episodes=%d%s",
+            " vol_switch=%.1f%% forced_switch=%.1f%% expl_var=%.3f episodes=%d%s",
             self.num_timesteps,
             label,
             win_rate,
@@ -358,18 +370,30 @@ class WinRateCallback(BaseCallback):
             dmg_efficiency,
             vol_switch_pct,
             forced_switch_pct,
+            expl_var,
             n,
             eps_str,
         )
+        # Verbose PPO internals to log file only
+        if not np.isnan(entropy):
+            log.debug(
+                "PPO internals: entropy=%.3f approx_kl=%.4f pg_loss=%.4f value_loss=%.3f clip_frac=%.3f",
+                entropy,
+                approx_kl,
+                pg_loss,
+                value_loss,
+                clip_frac,
+            )
 
         if self.verbose:
             bar = "█" * int(win_rate * 20) + "░" * (20 - int(win_rate * 20))
+            ev_str = f"  ev={expl_var:.2f}" if not np.isnan(expl_var) else ""
             print(
                 f"  step {self.num_timesteps:>6,} │ "
                 f"vs {label}: {win_rate * 100:>5.1f}%  [{bar}]  "
                 f"avg {avg_length:.0f} turns  "
                 f"bestmv {best_move_rate:.0f}%  dmgeff {dmg_efficiency:.2f}  "
-                f"vol.sw {vol_switch_pct:.0f}%  forced {forced_switch_pct:.0f}%  "
+                f"vol.sw {vol_switch_pct:.0f}%  forced {forced_switch_pct:.0f}%{ev_str}  "
                 f"({n} eps){eps_str}"
             )
 
@@ -408,17 +432,35 @@ class WinRateCallback(BaseCallback):
 
         # Content logging
         self._update_content_log(
-            win_rate, avg_length, action_pct, n, vol_switch_pct, forced_switch_pct, best_move_rate, dmg_efficiency
+            win_rate,
+            avg_length,
+            action_pct,
+            n,
+            vol_switch_pct,
+            forced_switch_pct,
+            best_move_rate,
+            dmg_efficiency,
+            expl_var,
         )
         self._check_win_rate_milestones(win_rate, avg_length, action_pct)
         self._maybe_snapshot_replays(win_rate)
 
     def _update_content_log(
-        self, win_rate, avg_length, action_pct, n, vol_switch_pct, forced_switch_pct, best_move_rate, dmg_efficiency
+        self,
+        win_rate,
+        avg_length,
+        action_pct,
+        n,
+        vol_switch_pct,
+        forced_switch_pct,
+        best_move_rate,
+        dmg_efficiency,
+        expl_var,
     ) -> None:
         """Append a row to content/training_log.md."""
         top_move = int(np.argmax(self._action_counts[6:])) + 1  # 1-indexed
         top_move_pct = action_pct[6 + np.argmax(self._action_counts[6:])]
+        ev_str = f"{expl_var:>6.3f}" if not np.isnan(expl_var) else "   N/A"
 
         row = (
             f"| {self.num_timesteps:>7} "
@@ -426,6 +468,7 @@ class WinRateCallback(BaseCallback):
             f"| {avg_length:>5.1f} "
             f"| {best_move_rate:>5.1f}% "
             f"| {dmg_efficiency:>5.2f} "
+            f"| {ev_str} "
             f"| {vol_switch_pct:>5.1f}% "
             f"| {forced_switch_pct:>5.1f}% "
             f"| move_{top_move} ({top_move_pct:.1f}%) "
@@ -533,6 +576,29 @@ class WinRateCallback(BaseCallback):
                     f"  [Shaping] factor={new_factor:.2f} (battle {self._total_episodes}/{self.shaping_decay_battles})"
                 )
 
+    def _maybe_adjust_entropy(self, win_rate: float) -> None:
+        """Increase entropy when stuck at low win rate, decrease when winning.
+
+        Prevents the death spiral: when the agent always loses, PPO advantages
+        are ~0 and the policy stops exploring. High entropy forces exploration.
+        When the agent starts winning, lower entropy lets the policy sharpen.
+        """
+        if not hasattr(self.model, "ent_coef"):
+            return
+        ent = self.model.ent_coef
+        if win_rate < 0.10 and ent < 0.1:
+            new_ent = min(ent * 1.5, 0.1)
+            self.model.ent_coef = new_ent
+            log.info("Entropy: %.3f -> %.3f (win_rate=%.2f, stuck — forcing exploration)", ent, new_ent, win_rate)
+            if self.verbose:
+                print(f"  [Entropy] Stuck at {win_rate:.0%} — increased ent_coef to {new_ent:.3f}")
+        elif win_rate > 0.50 and ent > 0.01:
+            new_ent = max(ent * 0.9, 0.01)
+            self.model.ent_coef = new_ent
+            log.info("Entropy: %.3f -> %.3f (win_rate=%.2f, winning — sharpening)", ent, new_ent, win_rate)
+            if self.verbose:
+                print(f"  [Entropy] Winning at {win_rate:.0%} — decreased ent_coef to {new_ent:.3f}")
+
     def _maybe_anneal_epsilon(self, win_rate: float) -> None:
         """Set opponent epsilon as a continuous function of win rate.
 
@@ -594,8 +660,8 @@ class WinRateCallback(BaseCallback):
             f"\n## Phase vs {label}\n\n"
             f"Started: {date}  \n"
             f"Target: {target * 100:.0f}% win rate\n\n"
-            f"| Step    | Win Rate | Avg Turns | BestMv% | DmgEff | Vol.Sw% | Forced% | Top Move         | Episodes |\n"
-            f"|---------|----------|-----------|---------|--------|---------|---------|------------------|----------|\n"
+            f"| Step    | Win Rate | Avg Turns | BestMv% | DmgEff | ExplVar | Vol.Sw% | Forced% | Top Move         | Episodes |\n"
+            f"|---------|----------|-----------|---------|--------|---------|---------|---------|------------------|----------|\n"
         )
         mode = "a" if self.content_log.exists() else "w"
         with open(self.content_log, mode, encoding="utf-8") as f:
