@@ -26,6 +26,8 @@ from poke_env.environment.single_agent_wrapper import SingleAgentWrapper
 from poke_env.environment.singles_env import SinglesEnv
 from poke_env.ps_client.account_configuration import AccountConfiguration
 
+from src.tier_baseline import matchup_baseline
+
 _GEN1_TYPE_CHART = GenData.from_gen(1).type_chart
 
 _STATUS_TO_FLOAT = {
@@ -277,8 +279,6 @@ class Gen1Env(SinglesEnv):
         # so the agent gets more credit for winning bad matchups and less for easy ones.
         # Only applied on terminal steps (win/loss) to avoid distorting per-turn shaping.
         if battle.won or battle.lost:
-            from src.tier_baseline import matchup_baseline
-
             reward -= matchup_baseline(battle)
         return reward
 
