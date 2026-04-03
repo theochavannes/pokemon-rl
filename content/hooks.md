@@ -231,6 +231,19 @@ The key insight came from the competitive player: **type charts don't predict Ge
 
 **Visual:** Split screen — agent's view (one Pokemon visible on each side) vs evaluator's view (both full teams with tier ratings). "The agent is playing blind. The evaluator sees the whole board."
 
+### Expert Panel #3: "Why Can't The Agent Learn?" (2026-04-03)
+**Hook:** "We had 14 experts — RL researchers, competitive Pokemon champions, and the entire dev team — and after looking at 672,000 training steps, they reached a devastating conclusion: the agent never actually learned to play Pokemon."
+
+The agent that was winning 96% of games couldn't beat an opponent that just picks random attacks. Its 90% win rate against Random was entirely from a hardcoded logit bias (prefer attacks over switches), not from any learned skill. When the opponent started attacking back, the win rate dropped to coin-flip and stayed there for 200,000 steps.
+
+**The 7-turn death spiral:** When facing SoftmaxDamagePlayer, games lasted 7 turns instead of 45. The agent was getting swept in 3-4 real turns. For 400,000 training steps — roughly 50,000 games — the win rate was 0-3%. The agent had entered a death spiral: the value function learned "everything is equally terrible" so advantages were zero, so the policy got zero gradient signal, so it stayed terrible.
+
+**The competitive player's analogy:** "You're trying to teach a kid chess by throwing them into a grandmaster tournament. Teach it 1v1 matchups first."
+
+**Top recommendation from the panel:** Behavioral cloning — have the agent watch 10,000 games of a MaxDamage bot and learn to imitate it before RL training even begins. "Give it a non-random starting policy so it has something to improve on."
+
+**Visual:** Show the Phase C training log scrolling — 800 lines of 0%, 1%, 0%, 2%, 0%, 0%, 1%... for 400,000 steps. Then show the expert panel's ranked list of 31 proposed solutions.
+
 ### The Forced Switch Bug
 **Hook:** "Our metrics said the agent was voluntarily switching 18% of the time and never being forced to switch. That's impossible — Pokemon forces switches when your active faints."
 

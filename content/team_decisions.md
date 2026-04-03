@@ -202,3 +202,40 @@ A privileged evaluator that sees both full teams (information the agent never ge
 
 ### Decision
 Phased approach: VecNormalize first (free), then tier-score heuristic baseline, then asymmetric critic only if needed.
+
+---
+
+## 2026-04-03 — Deep Diagnosis: Why The Agent Can't Learn (Expert Panel #3)
+
+### Panel
+Internal team + 2 Smogon RBY competitive players + 2 RL specialists (debugging + curriculum design)
+
+### Root Cause
+The agent never learned to play Pokemon. The 90% Phase A win rate came entirely from the hardcoded logit bias (attacks > switches). Evidence:
+- Phase B vs RandAttacker: 50-55% for 200K steps (coin flip = no skill)
+- Phase C vs SoftmaxDmg: 0-3% for 400K steps (death spiral)
+- Action distribution identical across all phases (no learned behavior)
+- Explained variance stuck at 0.15 (value function is garbage)
+
+### Death spiral mechanism
+Phase transition → V(s) predictions anti-correlated with reality → wrong advantages → policy gets worse → loses every game → V(s) converges to "everything terrible" → advantages ≈ 0 → no gradient → stuck forever.
+
+### Key insight from competitive players
+"You're teaching a kid chess by throwing them into a grandmaster tournament." The agent needs to learn 1v1 matchup fundamentals (which move beats which Pokemon) before 6v6 strategy.
+
+### Missing observation features identified
+- Physical/special move category (Gen 1: all Fire moves are special, all Normal are physical)
+- Speed comparison (who attacks first — the most important binary in RBY)
+- KO estimation (estimated_damage / opp_remaining_hp — "does this move kill?")
+
+### Top 8 recommendations (ranked by panel consensus)
+1. **Inspect replay losses** — understand the failure before building fixes
+2. **Add KO estimation + speed comparison features** — trivial, high info
+3. **Per-move feedback reward** — direct credit for good move selection
+4. **Behavioral cloning warm-start** — imitate MaxDamage before RL
+5. **Single continuous curriculum** — eliminate phase transition shock
+6. **Verify reward flow end-to-end** — rule out bugs
+7. **Separate (larger) value function network**
+8. **Reset optimizer on phase transitions**
+
+Full ranked list of 31 ideas available in notes/panel_discussion_learning_stuck.md
