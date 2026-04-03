@@ -338,6 +338,9 @@ class WinRateCallback(BaseCallback):
         # Anneal opponent epsilon based on win rate
         self._maybe_anneal_epsilon(win_rate)
 
+        # Dynamic entropy: prevent death spiral by forcing exploration when stuck
+        self._maybe_adjust_entropy(win_rate)
+
         # Always log eval to file (structured for post-run analysis)
         label = self.phase_label or "opponent"
         eps_str = ""
@@ -532,6 +535,29 @@ class WinRateCallback(BaseCallback):
                 print(
                     f"  [Shaping] factor={new_factor:.2f} (battle {self._total_episodes}/{self.shaping_decay_battles})"
                 )
+
+    def _maybe_adjust_entropy(self, win_rate: float) -> None:
+        """Increase entropy when stuck at low win rate, decrease when winning.
+
+        Prevents the death spiral: when the agent always loses, PPO advantages
+        are ~0 and the policy stops exploring. High entropy forces exploration.
+        When the agent starts winning, lower entropy lets the policy sharpen.
+        """
+        if not hasattr(self.model, "ent_coef"):
+            return
+        ent = self.model.ent_coef
+        if win_rate < 0.10 and ent < 0.1:
+            new_ent = min(ent * 1.5, 0.1)
+            self.model.ent_coef = new_ent
+            log.info("Entropy: %.3f -> %.3f (win_rate=%.2f, stuck — forcing exploration)", ent, new_ent, win_rate)
+            if self.verbose:
+                print(f"  [Entropy] Stuck at {win_rate:.0%} — increased ent_coef to {new_ent:.3f}")
+        elif win_rate > 0.50 and ent > 0.01:
+            new_ent = max(ent * 0.9, 0.01)
+            self.model.ent_coef = new_ent
+            log.info("Entropy: %.3f -> %.3f (win_rate=%.2f, winning — sharpening)", ent, new_ent, win_rate)
+            if self.verbose:
+                print(f"  [Entropy] Winning at {win_rate:.0%} — decreased ent_coef to {new_ent:.3f}")
 
     def _maybe_anneal_epsilon(self, win_rate: float) -> None:
         """Set opponent epsilon as a continuous function of win rate.

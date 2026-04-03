@@ -210,15 +210,27 @@ def main(new_run: bool = False) -> None:
                         ppo_kwargs={**PPO_KWARGS, "tensorboard_log": run.logs_dir},
                     )
             else:
-                model = MaskablePPO(env=env, **{**PPO_KWARGS, "tensorboard_log": run.logs_dir})
-                # Bias policy toward moves (actions 6-9) over switches (actions 0-5).
-                # The bias is a learned parameter — PPO will adjust it naturally.
-                with torch.no_grad():
-                    model.policy.action_net.bias.data[:6] -= 2.0  # penalize switches
-                    model.policy.action_net.bias.data[6:] += 2.0  # boost moves
-                    print(
-                        f"  Logit bias: switches={model.policy.action_net.bias.data[:6].mean():.1f}, moves={model.policy.action_net.bias.data[6:].mean():.1f}"
+                # Try loading BC warm-start model (pre-trained on MaxDamagePlayer)
+                bc_path = Path("models/bc_warmstart.zip")
+                if bc_path.exists():
+                    print(f"  Loading behavioral cloning warm-start from {bc_path}")
+                    model = MaskablePPO.load(
+                        str(bc_path.with_suffix("")),
+                        env=env,
+                        **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
+                        tensorboard_log=run.logs_dir,
                     )
+                    print("  BC warm-start loaded — skipping logit bias")
+                else:
+                    model = MaskablePPO(env=env, **{**PPO_KWARGS, "tensorboard_log": run.logs_dir})
+                    # Bias policy toward moves (actions 6-9) over switches (actions 0-5).
+                    # The bias is a learned parameter — PPO will adjust it naturally.
+                    with torch.no_grad():
+                        model.policy.action_net.bias.data[:6] -= 2.0  # penalize switches
+                        model.policy.action_net.bias.data[6:] += 2.0  # boost moves
+                        print(
+                            f"  Logit bias: switches={model.policy.action_net.bias.data[:6].mean():.1f}, moves={model.policy.action_net.bias.data[6:].mean():.1f}"
+                        )
         else:
             model.set_env(env)
 
