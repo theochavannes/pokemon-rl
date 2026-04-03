@@ -47,6 +47,9 @@ OPPONENT_UPDATE_FREQ = 50_000
 
 PPO_KWARGS = dict(
     policy="MlpPolicy",
+    policy_kwargs=dict(
+        net_arch=dict(pi=[256, 64], vf=[256, 128]),  # Separate nets, wider first layer
+    ),
     n_steps=2048,
     batch_size=64,
     n_epochs=10,

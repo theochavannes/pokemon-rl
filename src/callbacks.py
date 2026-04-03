@@ -489,11 +489,12 @@ class WinRateCallback(BaseCallback):
 
         # Handle both epsilon-based and temperature-based opponents
         if hasattr(self.opponents[0], "temperature"):
-            # Softmax: temperature = 2.0 at wr=0%, 0.1 at wr=100%
-            target_temp = 2.0 * (1.0 - eps_win_rate) + 0.1 * eps_win_rate
+            # Softmax: temperature = eps_start at wr=0%, eps_end at wr=100%
+            target_temp = eps_start * (1.0 - eps_win_rate) + eps_end * eps_win_rate
             current_temp = self.opponents[0].temperature
-            # Rate limit: max change 0.1 per eval
-            new_temp = current_temp + max(min(target_temp - current_temp, 0.1), -0.1)
+            # Rate limit: max change proportional to range (larger range = faster annealing)
+            max_step = max(0.1, (eps_start - eps_end) * 0.02)  # 2% of range per eval
+            new_temp = current_temp + max(min(target_temp - current_temp, max_step), -max_step)
             if abs(new_temp - current_temp) > 0.01:
                 for opp in self.opponents:
                     if hasattr(opp, "temperature"):

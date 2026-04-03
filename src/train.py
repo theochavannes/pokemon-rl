@@ -48,7 +48,10 @@ BATTLE_FORMAT = "gen1randombattle"
 N_ENVS = 4
 
 PPO_KWARGS = dict(
-    policy="MlpPolicy",  # [64, 64] MLP — tested [128,128] and [256,256], both worse
+    policy="MlpPolicy",
+    policy_kwargs=dict(
+        net_arch=dict(pi=[256, 64], vf=[256, 128]),  # Separate nets, wider first layer
+    ),
     n_steps=2048,
     batch_size=64,
     n_epochs=10,
@@ -61,42 +64,18 @@ PPO_KWARGS = dict(
 )
 
 CURRICULUM = [
+    # Single continuous curriculum: SoftmaxDmg opponent anneals from near-random
+    # (temp=100) to near-MaxDamage (temp=0.1). No phase transitions = no
+    # distribution shift = no catastrophic collapse.
     dict(
         name="A",
-        opponent_type="random",
-        phase_label="Random",
-        target_wr=0.90,
-        max_steps=200_000,
-        shaping_factor=1.0,
-    ),
-    dict(
-        name="B",
-        opponent_type="random_attacker",
-        phase_label="RandAttacker",
-        target_wr=0.95,
-        max_steps=200_000,
-        shaping_factor=1.0,
-    ),
-    dict(
-        name="C",
         opponent_type="softmax_damage",
         phase_label="SoftmaxDmg",
         target_wr=0.70,
-        max_steps=400_000,
+        max_steps=2_000_000,
         shaping_factor=1.0,
-        epsilon_start=2.0,  # temperature: 2.0 = soft, anneals to 0.1 = near-argmax
+        epsilon_start=100.0,  # temperature: 100.0 ≈ random, anneals to 0.1 ≈ argmax
         epsilon_end=0.1,
-    ),
-    dict(
-        name="D",
-        opponent_type="mixed",
-        phase_label="Mixed+Self",
-        target_wr=0.60,
-        max_steps=500_000,
-        shaping_factor=1.0,
-        epsilon_start=0.95,
-        epsilon_end=0.0,
-        selfplay=True,
     ),
 ]
 

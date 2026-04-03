@@ -3,7 +3,7 @@ Gen 1 (RBY) Gymnasium environment.
 
 Wraps poke-env's SinglesEnv for use with MaskablePPO.
 
-Observation space : Box(-1, 1, shape=(421,), float32)
+Observation space : Box(-1, 1, shape=(478,), float32)
 Action space      : Discrete — provided by SinglesEnv, masked via action_masks()
 Reward            : Shaped (fainted/HP/status deltas) + ±3.0 terminal victory bonus
 
@@ -56,13 +56,14 @@ def _hp(pokemon) -> float:
 
 def _move_features(move, opponent) -> list:
     """
-    5 features per move:
+    6 features per move:
       base_power     — normalized by 150
       type_index     — PokemonType enum value / 18
       pp_fraction    — current_pp / max_pp
       effectiveness  — type multiplier vs opponent / 4 (max 4x in Gen 1)
       accuracy       — move accuracy 0.0–1.0 (1.0 = always hits)
-                       Distinguishes Thunder (70%) from Thunderbolt (100%)
+      ko_ratio       — rough estimate of (damage / opp HP), capped at 1.0
+                       Tells the agent "does this move threaten a KO?"
     """
     base_power = move.base_power / 150.0
     type_index = move.type.value / 18.0
@@ -79,11 +80,20 @@ def _move_features(move, opponent) -> list:
     except Exception:
         accuracy = 1.0
 
-    return [base_power, type_index, pp_fraction, effectiveness, accuracy]
+    # KO ratio: rough damage proxy / opponent remaining HP
+    opp_hp = float(opponent.current_hp_fraction) if not opponent.fainted else 0.0
+    if opp_hp > 0 and base_power > 0:
+        damage_proxy = base_power * effectiveness * 4.0  # undo effectiveness normalization
+        ko_ratio = min(damage_proxy / opp_hp, 1.0)
+    else:
+        ko_ratio = 0.0
+
+    return [base_power, type_index, pp_fraction, effectiveness, accuracy, ko_ratio]
 
 
 _STAT_SCALE = 255.0  # Gen 1 max base stat ceiling (Chansey HP=250, safe upper bound)
 _PAR_SPEED_MULT = 0.25  # Paralysis quarters speed in Gen 1 (separate from stage boosts)
+_OBS_DIM = 478  # Total observation dimensions (see embed_battle docstring)
 
 
 def _types(pokemon) -> list:
@@ -113,31 +123,32 @@ def _base_stats(pokemon) -> list:
 
 def embed_battle(battle) -> np.ndarray:
     """
-    Produces a 421-dim float32 observation from a poke-env Battle object.
+    Produces a 478-dim float32 observation from a poke-env Battle object.
 
     All Pokemon are forced to level 100 in our Showdown config, so level is
     omitted (always 1.0). Speed in base_stats is paralysis-adjusted (PAR
     quarters speed independently of stage boosts, a Gen 1 mechanic NOT
     captured in pokemon.boosts["spe"]).
 
-    Observation breakdown (421 dims):
+    Observation breakdown (478 dims):
       Own active        16  HP, 6 boosts (incl acc+eva), status, active, fainted,
                             type_1, type_2, base_atk, base_def, base_spa, base_spe*
-      Own moves         20  4 moves × 5 features (base_power, type, PP, effectiveness,
-                            accuracy) — accuracy distinguishes Thunder(70%) vs Tbolt(100%)
-      Own bench        174  6 slots × 29 features:
+      Own moves         24  4 moves × 6 features (base_power, type, PP, effectiveness,
+                            accuracy, ko_ratio)
+      Own bench        198  6 slots × 33 features:
                             HP, fainted, type_1, type_2, status,
                             base_atk, base_def, base_spa, base_spe*,
-                            4 moves × 5 features (power, type, PP, effectiveness vs opp, accuracy)
+                            4 moves × 6 features (power, type, PP, effectiveness, accuracy, ko_ratio)
       Opp active        15  HP, 6 boosts (incl acc+eva), status, fainted,
                             type_1, type_2, base_atk, base_def, base_spa, base_spe*
-      Opp bench        174  6 slots × 29 features:
+      Opp bench        198  6 slots × 33 features:
                             HP, fainted, revealed, type_1, type_2,
                             base_atk, base_def, base_spa, base_spe*,
-                            up to 4 REVEALED moves × 5 features (effectiveness vs own active)
+                            up to 4 REVEALED moves × 6 features (effectiveness vs own active)
                             unrevealed = [-1, 0, 0, ..., 0]
-      Opp revealed mvs  20  up to 4 seen opp ACTIVE moves × 5 features (padded)
+      Opp revealed mvs  24  up to 4 seen opp ACTIVE moves × 6 features (padded)
       Trapping           2  own_trapped, opp_maybe_trapped (0/1 flags)
+      Speed comparison   1  own_speed / (own_speed + opp_speed), paralysis-adjusted
 
     * base_spe is paralysis-adjusted where applicable.
     """
@@ -164,7 +175,7 @@ def embed_battle(battle) -> np.ndarray:
     for move in moves:
         obs.extend(_move_features(move, opp))
     for _ in range(4 - len(moves)):
-        obs.extend([0.0, 0.0, 0.0, 0.0, 0.0])
+        obs.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     # --- Own bench (6 × 29 = 174 dims) ---
     # Full info per bench Pokemon: stats, types, status, and all 4 moves with
@@ -183,9 +194,9 @@ def embed_battle(battle) -> np.ndarray:
             for move in bench_moves:
                 obs.extend(_move_features(move, opp))
             for _ in range(4 - len(bench_moves)):
-                obs.extend([0.0, 0.0, 0.0, 0.0, 0.0])
+                obs.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         else:
-            obs.extend([0.0] * 29)
+            obs.extend([0.0] * 33)
 
     # --- Opponent active Pokemon (15 dims) ---
     # Full 6 boosts (acc+eva included) — Double Team abuse is a real Gen 1 threat.
@@ -219,9 +230,9 @@ def embed_battle(battle) -> np.ndarray:
             for move in opp_bench_moves:
                 obs.extend(_move_features(move, own))  # effectiveness vs OUR active
             for _ in range(4 - len(opp_bench_moves)):
-                obs.extend([0.0, 0.0, 0.0, 0.0, 0.0])
+                obs.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         else:
-            obs.extend([-1.0] + [0.0] * 28)
+            obs.extend([-1.0] + [0.0] * 32)
 
     # --- Opponent revealed moves (up to 4 × 5 = 20 dims) ---
     # Up to 4 moves the opponent has used, each with 5 features.
@@ -231,7 +242,7 @@ def embed_battle(battle) -> np.ndarray:
     for move in opp_revealed:
         obs.extend(_move_features(move, own))
     for _ in range(4 - len(opp_revealed)):
-        obs.extend([0.0, 0.0, 0.0, 0.0, 0.0])
+        obs.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     # --- Trapping (2 dims) ---
     # battle.trapped: OUR active Pokemon cannot switch (e.g. being Wrapped)
@@ -239,8 +250,20 @@ def embed_battle(battle) -> np.ndarray:
     obs.append(1.0 if battle.trapped else 0.0)
     obs.append(1.0 if battle.maybe_trapped else 0.0)
 
+    # --- Speed comparison (1 dim) ---
+    # "Am I faster?" is the most important binary in Gen 1 — determines who
+    # attacks first. Paralysis quarters speed independently of boosts.
+    own_spe = own.base_stats.get("spe", 0)
+    opp_spe = opp.base_stats.get("spe", 0)
+    if own.status == Status.PAR:
+        own_spe *= _PAR_SPEED_MULT
+    if opp.status == Status.PAR:
+        opp_spe *= _PAR_SPEED_MULT
+    speed_total = own_spe + opp_spe
+    obs.append(own_spe / speed_total if speed_total > 0 else 0.5)
+
     result = np.array(obs, dtype=np.float32)
-    assert result.shape == (421,), f"Obs shape mismatch: expected (421,), got {result.shape}"
+    assert result.shape == (_OBS_DIM,), f"Obs shape mismatch: expected ({_OBS_DIM},), got {result.shape}"
     assert np.all(np.isfinite(result)), "Obs contains NaN/Inf"
     return result
 
@@ -249,14 +272,15 @@ class Gen1Env(SinglesEnv):
     """
     Gen 1 random battle environment for MaskablePPO.
 
-    Observation breakdown (421 dims total):
+    Observation breakdown (478 dims total):
       Own active        :  16 dims  HP, 6 boosts, status, active, fainted, types, 4 stats
-      Own moves         :  20 dims  4 moves × 5 features
-      Own bench         : 174 dims  6 × 29 (stats, types, status, 4 moves w/ effectiveness)
+      Own moves         :  24 dims  4 moves × 6 features (incl ko_ratio)
+      Own bench         : 198 dims  6 × 33 (stats, types, status, 4 moves × 6 features)
       Opp active        :  15 dims  HP, 6 boosts, status, fainted, types, 4 stats
-      Opp bench         : 174 dims  6 × 29 (stats, types, revealed moves w/ effectiveness vs own)
-      Opp revealed mvs  :  20 dims  up to 4 seen opp active moves × 5 features
+      Opp bench         : 198 dims  6 × 33 (stats, types, revealed moves × 6 features)
+      Opp revealed mvs  :  24 dims  up to 4 seen opp active moves × 6 features
       Trapping          :   2 dims  own_trapped, own_maybe_trapped
+      Speed comparison  :   1 dim   own_speed / (own_speed + opp_speed)
       * base_spe is paralysis-adjusted (PAR quarters speed in Gen 1)
     """
 
@@ -286,7 +310,7 @@ class Gen1Env(SinglesEnv):
         return embed_battle(battle)
 
     def describe_embedding(self):
-        return Box(low=-1.0, high=1.0, shape=(421,), dtype=np.float32)
+        return Box(low=-1.0, high=1.0, shape=(_OBS_DIM,), dtype=np.float32)
 
 
 class SB3Wrapper(gymnasium.Wrapper):
