@@ -202,3 +202,33 @@ A privileged evaluator that sees both full teams (information the agent never ge
 
 ### Decision
 Phased approach: VecNormalize first (free), then tier-score heuristic baseline, then asymmetric critic only if needed.
+
+---
+
+## 2026-04-03 — Behavioral Cloning Success + What's Next (Expert Panel #4)
+
+### BC Results
+- 99.0% validation accuracy imitating MaxDamagePlayer (142K transitions, 5000 games)
+- Agent starts training at 94% vs Random, 70-80% vs RandAttacker (vs 2% before BC)
+- BestMv% at 80%+ (was 25% random)
+- Death spiral completely eliminated
+
+### BC Policy Degradation Problem
+PPO was eroding the BC policy — BestMv% dropped from 82% to 64% over 130K steps. Root cause: noisy advantages (from bad value function) + entropy bonus push toward uniform policy. Fixes applied:
+- Reward simplified to faint differential + win/loss only (removed HP/status noise)
+- Learning rate lowered from 3e-4 to 1e-4
+
+### Panel #4: Post-BC Training Strategy
+14-expert panel (including DeepMind AlphaStar engineer, CMU professor, 2 Smogon RBY champions).
+
+**Key insight:** Self-play alone between two agents that never switch is useless — they just trade attacks. Diverse opponents are needed to force the full skill set (especially switching).
+
+**Unanimous recommendation (#1 of 35 ideas):** Mixed opponent pool using 4 existing envs:
+- Env 0: Self-play (frozen BC model)
+- Env 1: MaxDamagePlayer
+- Env 2: TypeMatchupPlayer (forces switching)
+- Env 3: SoftmaxDamagePlayer (temp annealing)
+
+Plus KL penalty against BC policy to prevent forgetting, and BC regression tests.
+
+Full ranked list of 35 ideas in notes/panel4_full_conversation.md
