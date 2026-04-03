@@ -84,9 +84,7 @@ class ValueDataCollector(SmartHeuristicPlayer):
         return SinglesEnv.action_to_order(action, battle)
 
     def calc_reward(self, battle) -> float:
-        from poke_env.environment.abstract_battle import AbstractBattle
-
-        return AbstractBattle.reward_computing_helper(
+        return self.reward_computing_helper(
             battle,
             fainted_value=0.5,
             hp_value=0.0,
