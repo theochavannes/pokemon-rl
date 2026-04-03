@@ -302,13 +302,22 @@ class SB3Wrapper(gymnasium.Wrapper):
         super().__init__(env)
         self.observation_space = env.observation_space["observation"]
         self._last_action_mask = np.ones(env.action_space.n, dtype=bool)
+        self.desync_count: int = 0
+        self.step_count: int = 0
 
     def step(self, action):
+        self.step_count += 1
         try:
             obs_dict, reward, terminated, truncated, info = self.env.step(action)
-        except ValueError:
+        except ValueError as e:
             # poke-env occasionally desyncs on opponent action. Use neutral reward
             # (0.0) so this doesn't poison training with fake losses.
+            self.desync_count += 1
+            import logging
+
+            logging.getLogger("pokemon_rl.env").warning(
+                "DESYNC #%d (step %d): %s — forfeiting battle", self.desync_count, self.step_count, e
+            )
             obs, info = self.reset()
             info["desync"] = True
             return obs, 0.0, True, False, info
@@ -367,6 +376,7 @@ def make_env(
         battle_format=battle_format,
         log_level=40,
         save_replays=save_replays,
+        strict=False,  # Gracefully handle invalid opponent orders (fallback to random)
     )
 
     if opponent_type == "random_damage":

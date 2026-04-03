@@ -358,6 +358,23 @@ class WinRateCallback(BaseCallback):
             if self._per_env_total[idx] > 0:
                 opp_wr = self._per_env_wins[idx] / self._per_env_total[idx]
                 self.logger.record(f"train/wr_{lbl}", opp_wr, exclude=_tb_only)
+        # Desync tracking — how many battles ended in forfeit due to ValueError
+        total_desyncs = 0
+        total_steps = 0
+        if self._env and hasattr(self._env, "envs"):
+            for e in self._env.envs:
+                # Navigate wrapper chain: Monitor -> SB3Wrapper
+                inner = e
+                while hasattr(inner, "env"):
+                    if hasattr(inner, "desync_count"):
+                        total_desyncs += inner.desync_count
+                        total_steps += inner.step_count
+                        break
+                    inner = inner.env
+        if total_steps > 0:
+            desync_rate = total_desyncs / total_steps * 100
+            self.logger.record("train/desync_count", total_desyncs, exclude=_tb_only)
+            self.logger.record("train/desync_rate_pct", desync_rate, exclude=_tb_only)
         self.logger.dump(self.num_timesteps)
 
         # Decay reward shaping based on total battles
@@ -379,9 +396,12 @@ class WinRateCallback(BaseCallback):
             if hasattr(opp, "epsilon"):
                 eps_str = f" opp_eps={opp.epsilon:.2f}"
                 break
+        desync_str = ""
+        if total_desyncs > 0:
+            desync_str = f" desyncs={total_desyncs}({desync_rate:.1f}%)"
         log.info(
             "EVAL step=%d vs=%s win_rate=%.3f avg_turns=%.1f best_move=%.1f%% dmg_eff=%.2f"
-            " vol_switch=%.1f%% forced_switch=%.1f%% expl_var=%.3f episodes=%d%s",
+            " vol_switch=%.1f%% forced_switch=%.1f%% expl_var=%.3f episodes=%d%s%s",
             self.num_timesteps,
             label,
             win_rate,
@@ -393,6 +413,7 @@ class WinRateCallback(BaseCallback):
             expl_var,
             n,
             eps_str,
+            desync_str,
         )
         # Verbose PPO internals to log file only
         if not np.isnan(entropy):
@@ -415,13 +436,14 @@ class WinRateCallback(BaseCallback):
                     opp_wr = self._per_env_wins[idx] / self._per_env_total[idx] * 100
                     opp_parts.append(f"{lbl}={opp_wr:.0f}%")
             opp_str = f"  [{', '.join(opp_parts)}]" if opp_parts else ""
+            desync_console = f"  ⚠desyncs={total_desyncs}" if total_desyncs > 0 else ""
             print(
                 f"  step {self.num_timesteps:>6,} │ "
                 f"vs {label}: {win_rate * 100:>5.1f}%  [{bar}]  "
                 f"avg {avg_length:.0f} turns  "
                 f"bestmv {best_move_rate:.0f}%  dmgeff {dmg_efficiency:.2f}  "
                 f"vol.sw {vol_switch_pct:.0f}%  forced {forced_switch_pct:.0f}%{ev_str}  "
-                f"({n} eps){eps_str}{opp_str}"
+                f"({n} eps){eps_str}{opp_str}{desync_console}"
             )
 
         # Update frozen self-play opponent every 50K steps
@@ -501,9 +523,25 @@ class WinRateCallback(BaseCallback):
         expl_var,
     ) -> None:
         """Append a row to content/training_log.md."""
-        top_move = int(np.argmax(self._action_counts[6:])) + 1  # 1-indexed
-        top_move_pct = action_pct[6 + np.argmax(self._action_counts[6:])]
         ev_str = f"{expl_var:>6.3f}" if not np.isnan(expl_var) else "   N/A"
+
+        # Per-opponent win rates
+        opp_strs = []
+        for idx, lbl in enumerate(self._per_env_labels):
+            if self._per_env_total[idx] > 0:
+                opp_wr = self._per_env_wins[idx] / self._per_env_total[idx] * 100
+                opp_strs.append(f"{lbl}={opp_wr:.0f}%")
+        opp_col = ", ".join(opp_strs) if opp_strs else "N/A"
+
+        # Temperature/epsilon
+        temp_str = "N/A"
+        for opp in self.opponents:
+            if hasattr(opp, "temperature"):
+                temp_str = f"{opp.temperature:.2f}"
+                break
+            if hasattr(opp, "epsilon"):
+                temp_str = f"{opp.epsilon:.2f}"
+                break
 
         row = (
             f"| {self.num_timesteps:>7} "
@@ -514,7 +552,8 @@ class WinRateCallback(BaseCallback):
             f"| {ev_str} "
             f"| {vol_switch_pct:>5.1f}% "
             f"| {forced_switch_pct:>5.1f}% "
-            f"| move_{top_move} ({top_move_pct:.1f}%) "
+            f"| {temp_str} "
+            f"| {opp_col} "
             f"| {n} |\n"
         )
         with open(self.content_log, "a", encoding="utf-8") as f:
@@ -703,8 +742,8 @@ class WinRateCallback(BaseCallback):
             f"\n## Phase vs {label}\n\n"
             f"Started: {date}  \n"
             f"Target: {target * 100:.0f}% win rate\n\n"
-            f"| Step    | Win Rate | Avg Turns | BestMv% | DmgEff | ExplVar | Vol.Sw% | Forced% | Top Move         | Episodes |\n"
-            f"|---------|----------|-----------|---------|--------|---------|---------|---------|------------------|----------|\n"
+            f"| Step    | Win Rate | Avg Turns | BestMv% | DmgEff | ExplVar | Vol.Sw% | Forced% | Temp  | Per-Opponent WR          | Episodes |\n"
+            f"|---------|----------|-----------|---------|--------|---------|---------|---------|-------|--------------------------|----------|\n"
         )
         mode = "a" if self.content_log.exists() else "w"
         with open(self.content_log, mode, encoding="utf-8") as f:

@@ -266,6 +266,19 @@ PPO's `clip_range` went from 0.2 to 0.1. This limits how much the policy can cha
 - **TypeMatchupPlayer (Env 2):** Switches to type advantages. Forces the agent to handle smart switching.
 - **SoftmaxDamagePlayer (Env 3):** Probabilistic damage selection, temperature anneals from random-ish (2.0) to near-deterministic (0.1) based on the agent's win rate.
 
+### The Silent Forfeit Catastrophe
+**Hook:** "The agent was forfeiting every single game and the training just kept going like nothing was wrong."
+
+First mixed_league run (run_036): 25% win rate, 9-turn average, 0% voluntary switches. Looked bad but not suspicious. Then we opened the replays — **every game ended with the agent forfeiting**, many on turn 1 before any moves were played.
+
+**Root cause:** poke-env validates opponent moves with `strict=True`. When the opponent's chosen order doesn't match valid orders (battle state timing), it raises ValueError. Our error handler caught it and called reset() — which forfeits the current game.
+
+**The kicker:** Env 0 (self-play via FrozenPolicyPlayer) worked perfectly because FrozenPolicyPlayer uses `strict=False`. The heuristic opponents (MaxDamage, TypeMatchup, SoftmaxDamage) all forfeited every game. The training ran for 24K steps of pure garbage data and never flagged a problem.
+
+**Fix:** One line — `strict=False` in the Gen1Env constructor. Invalid orders now gracefully fall back to random instead of crashing.
+
+**Visual:** Side-by-side replay comparison — "working" game (env 0, 40+ turns) vs "broken" game (env 1, forfeit on turn 1). Same code, same agent, different outcome based on one boolean flag buried in poke-env internals.
+
 ### What to Watch For
 - Does BestMv% stay above 70%? (BC knowledge preserved)
 - Does Vol.Switch% start increasing? (TypeMatchup forcing switching decisions)

@@ -262,3 +262,26 @@ New TensorBoard metrics: `train/wr_SelfPlay`, `train/wr_MaxDmg`, `train/wr_TypeM
 
 ### Expanded Team
 Sprint 3A assembled the largest team yet: core 11 agents plus 5 new specialists (second code reviewer, academic RL expert, DeepMind RL expert, staff engineer, test engineer). 16 experts total for 4 files changed.
+
+---
+
+## 2026-04-03 — Critical Bug: Silent Forfeit on Every Heuristic Game
+
+### The Bug
+First mixed_league training run (run_036) showed 25% win rate, 9-turn averages, 0% voluntary switches. Replays revealed the agent was forfeiting every game against heuristic opponents (envs 1-3). Only self-play (env 0) played real games.
+
+### Root Cause
+poke-env's `SinglesEnv.order_to_action()` validates opponent orders with `strict=True` by default. When a heuristic opponent's chosen move order doesn't match `battle.valid_orders` (due to battle state timing), it raises `ValueError`. Our `SB3Wrapper.step()` catches ValueError and calls `reset()` — which forfeits the current battle.
+
+FrozenPolicyPlayer (env 0) was immune because it uses `strict=False` internally for its own order conversion.
+
+### Fix
+Pass `strict=False` to `Gen1Env` constructor. Invalid opponent orders now fall back to a random valid move instead of crashing the battle.
+
+### Monitoring Added
+- `SB3Wrapper` now tracks `desync_count` and `step_count`
+- `WinRateCallback` reports desync stats in eval lines, TensorBoard, and training_log.md
+- Each desync logs a WARNING with the specific error message
+
+### Lesson
+Silent error handling that "recovers" by forfeiting is worse than crashing. The training ran 24K steps of garbage data with no indication anything was wrong. The win rate (25%) looked plausible for a new run. Without checking replays, this could have burned hours of GPU time.
