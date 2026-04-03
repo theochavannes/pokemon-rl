@@ -328,3 +328,26 @@ This is like teaching someone chess without telling them that knights can jump, 
 The neural network had 63,000 parameters trying to process 704 features. The first layer compressed 704 inputs through 64 neurons — an 11:1 ratio. For comparison, image classifiers compress at 3:1. We upgraded to 300K parameters with [256, 128] layers — 5x the capacity. Combined with encoding what moves actually DO (secondary effects, recoil, self-destruct), the agent can finally see the full game.
 
 **Visual:** Side-by-side network diagrams. Old: 704->64->64->10 (tiny funnel). New: 928->256->128->10 (proper pyramid). "Same game, 5x the brain."
+
+---
+
+## Act 8: The Full Picture (Sprint 5 — 2026-04-03)
+
+### The Agent Learns What Moves Actually Do
+**Hook:** "We went from 14 features per move to 19 — and the 5 new ones change everything."
+
+The obs space went from 928 to 1222 dimensions. But it's not about the numbers — it's about WHAT the agent can now see:
+
+1. **"This move paralyzes" vs "this move freezes"**: Before, Body Slam and Blizzard both just had a "secondary_chance" number. Now the agent knows Body Slam paralyzes (0.8) and Blizzard freezes (1.0). Freeze is PERMANENT in Gen 1 — the agent can learn why Blizzard is the best move in the game.
+
+2. **"Don't bother, they're immune"**: Toxic on a Poison type? Thunder Wave on a Ground type? The agent now sees a status_immune flag = 1.0. No more wasted turns.
+
+3. **"They're already statused"**: Thunder Wave on an already-paralyzed opponent? target_statused = 1.0. The agent can learn to stop doing useless things.
+
+4. **"This move traps you"**: Wrap/Bind/Clamp/Fire Spin get a trapping flag. In Gen 1, these prevent ALL actions for 2-5 turns — one of the most broken mechanics in the game.
+
+5. **Volatile status awareness**: Substitute up? Reflect halving damage? Confused? Leech Seeded? The agent can now see the battlefield, not just HP bars.
+
+**Visual:** Before/after comparison of Thunder Wave's observation vector. Before: [0, 0.72, 0.43, 0, 1.0, 1.0, 0.8, 0, 0, 0, 0, 0, 0, 0]. After: [0, 0.72, 0.43, 0, 1.0, 0, 0, 0.8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0/1]. The zeros that used to make it look useless now carry meaning.
+
+**Why it matters for the video:** This is the "giving the AI eyes" moment. All the previous training failures weren't because the AI was stupid — it was because it was playing blind. Now it can see the full game.

@@ -3,16 +3,16 @@ Gen 1 (RBY) Gymnasium environment.
 
 Wraps poke-env's SinglesEnv for use with MaskablePPO.
 
-Observation space : Box(-1, 1, shape=(928,), float32)
+Observation space : Box(-1, 1, shape=(1222,), float32)
 Action space      : Discrete — provided by SinglesEnv, masked via action_masks()
-Reward            : Shaped (fainted/HP/status deltas) + ±3.0 terminal victory bonus
+Reward            : Shaped (fainted/HP/status deltas) + terminal victory bonus
 
 Env stack for training:
     Gen1Env (SinglesEnv subclass)
         ↓
-    SingleAgentWrapper   obs = {"observation": np.array(928,), "action_mask": np.array(N,)}
+    SingleAgentWrapper   obs = {"observation": np.array(1222,), "action_mask": np.array(N,)}
         ↓
-    SB3Wrapper           obs = np.array(928,)  +  action_masks() -> bool array
+    SB3Wrapper           obs = np.array(1222,)  +  action_masks() -> bool array
         ↓
     DummyVecEnv / SubprocVecEnv
 """
@@ -22,7 +22,9 @@ import contextlib
 import gymnasium
 import numpy as np
 from gymnasium.spaces import Box
+from poke_env.battle.effect import Effect
 from poke_env.battle.move_category import MoveCategory
+from poke_env.battle.side_condition import SideCondition
 from poke_env.battle.status import Status
 from poke_env.data import GenData
 from poke_env.environment.single_agent_wrapper import SingleAgentWrapper
@@ -66,23 +68,98 @@ _MOVE_STATUS_MAP = {
     Status.FRZ: 1.0,
 }
 
-_MOVE_FEATURES_PER_MOVE = 14
+_MOVE_FEATURES_PER_MOVE = 19
 _MOVE_PADDING = [0.0] * _MOVE_FEATURES_PER_MOVE
+
+# Gen 1 trapping moves — prevent opponent from acting for 2-5 turns
+_TRAPPING_MOVES = {"wrap", "bind", "clamp", "firespin"}
+
+# Secondary effect type encoding: what the secondary effect DOES
+# Maps secondary status/volatile to a float. Positive = status, negative = stat drops.
+_SECONDARY_STATUS_TYPE = {
+    "par": 0.8,
+    "brn": 0.6,
+    "frz": 1.0,
+    "psn": 0.3,
+    "tox": 0.3,
+    "slp": 0.9,
+}
+
+
+def _secondary_effect_type(move) -> float:
+    """Encode what a move's secondary effect does (not just the chance)."""
+    try:
+        entry_sec = move.entry.get("secondary")
+        if not entry_sec:
+            return 0.0
+        # Status effect (Body Slam → par, Blizzard → frz)
+        if "status" in entry_sec:
+            return _SECONDARY_STATUS_TYPE.get(entry_sec["status"], 0.0)
+        # Volatile status (flinch, confusion)
+        if "volatileStatus" in entry_sec:
+            vs = entry_sec["volatileStatus"]
+            if vs == "flinch":
+                return 0.4
+            if vs == "confusion":
+                return 0.5
+            return 0.2
+        # Stat drops on opponent (Psychic → -spa, Acid → -def)
+        if "boosts" in entry_sec:
+            return sum(entry_sec["boosts"].values()) / 6.0  # negative for drops
+        return 0.0
+    except Exception:
+        return 0.0
+
+
+def _status_immune(move, target) -> float:
+    """Check if target's type makes it immune to this move's status effect.
+
+    Gen 1 status immunities:
+      - Poison/Toxic: Poison types immune
+      - Burn: Fire types immune
+      - Freeze: Ice types immune
+      - Thunder Wave: Ground types immune (Electric-type move, handled by effectiveness=0)
+      - Paralysis via Body Slam etc.: No immunity in Gen 1
+      - Sleep: No type immunity
+    """
+    if not move.status:
+        return 0.0
+    status = str(move.status).upper()
+    type_names = set()
+    for t in [target.type_1, target.type_2]:
+        if t is not None:
+            type_names.add(t.name.upper() if hasattr(t, "name") else str(t).upper())
+    if ("PSN" in status or "TOX" in status) and "POISON" in type_names:
+        return 1.0
+    if "BRN" in status and "FIRE" in type_names:
+        return 1.0
+    if "FRZ" in status and "ICE" in type_names:
+        return 1.0
+    return 0.0
 
 
 def _move_features(move, opponent) -> list:
     """
-    10 features per move:
-      base_power     — normalized by 150
-      type_index     — PokemonType enum value / 18
-      pp_fraction    — current_pp / max_pp
-      effectiveness  — type multiplier vs opponent / 4 (max 4x in Gen 1)
-      accuracy       — move accuracy 0.0–1.0 (1.0 = always hits)
-      category       — 0.0=Physical, 0.5=Special, 1.0=Status
-      status_effect  — status inflicted (0.0=none, 0.2=PSN, 0.4=BRN, 0.6=SLP, 0.8=PAR, 1.0=FRZ)
-      priority       — move priority / 5.0, clamped to [-1, 1]
-      self_boost     — sum of self-boost values / 6.0
-      heal           — healing fraction (0.0=none, drain/heal amount)
+    19 features per move:
+      base_power            — normalized by 150
+      type_index            — PokemonType enum value / 18
+      pp_fraction           — current_pp / max_pp
+      effectiveness         — type multiplier vs opponent / 4 (max 4x in Gen 1)
+      accuracy              — move accuracy 0.0–1.0 (1.0 = always hits)
+      is_physical           — 1.0 if Physical, else 0.0 (Step 6: one-hot category)
+      is_special            — 1.0 if Special, else 0.0
+      status_effect         — status inflicted (0.0=none … 1.0=FRZ)
+      priority              — move priority / 5.0, clamped to [-1, 1]
+      self_boost            — sum of self-boost values / 6.0
+      heal                  — self-heal fraction (Recover = 0.5) (Step 7: separated)
+      drain                 — drain fraction (Mega Drain = 0.5) (Step 7: separated)
+      secondary_chance      — secondary effect probability (Body Slam = 0.3)
+      secondary_effect_type — what secondary does (Step 1: PAR=0.8, FRZ=1.0, drops<0)
+      recoil                — recoil fraction (Submission = 0.25)
+      self_destruct         — 1.0 for Explosion/Self-Destruct
+      fixed_damage          — fixed damage / 100 (Seismic Toss = 1.0)
+      trapping              — 1.0 for Wrap/Bind/Clamp/Fire Spin (Step 8)
+      status_immune         — 1.0 if target's type blocks this move's status (Step 9)
     """
     base_power = move.base_power / 150.0
     type_index = move.type.value / 18.0
@@ -99,13 +176,9 @@ def _move_features(move, opponent) -> list:
     except Exception:
         accuracy = 1.0
 
-    # Category: 0.0=Physical, 0.5=Special, 1.0=Status
-    if move.category == MoveCategory.PHYSICAL:
-        category = 0.0
-    elif move.category == MoveCategory.SPECIAL:
-        category = 0.5
-    else:
-        category = 1.0
+    # Step 6: One-hot category (replaces single float)
+    is_physical = 1.0 if move.category == MoveCategory.PHYSICAL else 0.0
+    is_special = 1.0 if move.category == MoveCategory.SPECIAL else 0.0
 
     # Status effect the move inflicts
     try:
@@ -128,14 +201,15 @@ def _move_features(move, opponent) -> list:
         if boosts:
             self_boost_val = sum(boosts.values()) / 6.0
 
-    # Heal / drain
-    heal_val = 0.0
+    # Step 7: Separate heal and drain (they work differently)
+    heal = 0.0
     with contextlib.suppress(Exception):
         if move.heal and move.heal > 0:
-            heal_val = move.heal
+            heal = move.heal
+    drain = 0.0
     with contextlib.suppress(Exception):
         if move.drain and move.drain > 0:
-            heal_val = max(heal_val, move.drain)
+            drain = move.drain
 
     # Secondary status chance (Body Slam 30% para, Blizzard 10% freeze, etc.)
     secondary_chance = 0.0
@@ -143,6 +217,9 @@ def _move_features(move, opponent) -> list:
         entry_sec = move.entry.get("secondary")
         if entry_sec and "chance" in entry_sec:
             secondary_chance = entry_sec["chance"] / 100.0
+
+    # Step 1: Secondary effect TYPE (what the secondary does, not just the chance)
+    sec_effect_type = _secondary_effect_type(move)
 
     # Recoil fraction (Submission 0.25, Double-Edge 0.25)
     recoil_val = 0.0
@@ -160,21 +237,32 @@ def _move_features(move, opponent) -> list:
         elif isinstance(move.damage, int | float) and move.damage > 0:
             fixed_damage = move.damage / 100.0
 
+    # Step 8: Trapping move flag (Wrap/Bind/Clamp/Fire Spin — broken in Gen 1)
+    trapping = 1.0 if getattr(move, "id", "") in _TRAPPING_MOVES else 0.0
+
+    # Step 9: Status immunity flag
+    immune = _status_immune(move, opponent)
+
     return [
         base_power,
         type_index,
         pp_fraction,
         effectiveness,
         accuracy,
-        category,
+        is_physical,
+        is_special,
         status_effect,
         priority,
         self_boost_val,
-        heal_val,
+        heal,
+        drain,
         secondary_chance,
+        sec_effect_type,
         recoil_val,
         self_destruct,
         fixed_damage,
+        trapping,
+        immune,
     ]
 
 
@@ -211,37 +299,29 @@ def _base_stats(pokemon) -> list:
     ]
 
 
+_OBS_DIM = 1222
+
+
 def embed_battle(battle) -> np.ndarray:
     """
-    Produces a 928-dim float32 observation from a poke-env Battle object.
+    Produces a 1222-dim float32 observation from a poke-env Battle object.
 
     All Pokemon are forced to level 100 in our Showdown config, so level is
-    omitted (always 1.0). Speed in base_stats is paralysis-adjusted (PAR
-    quarters speed independently of stage boosts, a Gen 1 mechanic NOT
-    captured in pokemon.boosts["spe"]).
+    omitted (always 1.0). Speed in base_stats is paralysis-adjusted.
 
-    Observation breakdown (704 dims):
-      Own active        16  HP, 6 boosts (incl acc+eva), status, active, fainted,
-                            type_1, type_2, base_atk, base_def, base_spa, base_spe*
-      Own moves         40  4 moves × 10 features (base_power, type, PP, effectiveness,
-                            accuracy, category, status_effect, priority, self_boost, heal)
-      Own bench        294  6 slots × 49 features:
-                            HP, fainted, type_1, type_2, status,
-                            base_atk, base_def, base_spa, base_spe*,
-                            4 moves × 10 features
-      Opp active        15  HP, 6 boosts (incl acc+eva), status, fainted,
-                            type_1, type_2, base_atk, base_def, base_spa, base_spe*
-      Opp bench        294  6 slots × 49 features:
-                            HP, fainted, revealed, type_1, type_2,
-                            base_atk, base_def, base_spa, base_spe*,
-                            up to 4 REVEALED moves × 10 features (effectiveness vs own active)
-                            unrevealed = [-1, 0, 0, ..., 0]
-      Opp revealed mvs  40  up to 4 seen opp ACTIVE moves × 10 features (padded)
-      Trapping           2  own_trapped, opp_maybe_trapped (0/1 flags)
-      Speed advantage    1  (own_spe - opp_spe) / max(own_spe, opp_spe) clamped [-1,1]
-      Alive counts       2  own_alive/6, opp_alive/6
-
-    * base_spe is paralysis-adjusted where applicable.
+    Observation layout:
+      Own active         16   HP, 6 boosts, status, active, fainted, types, base stats
+      Own moves          80   4 × 19 move features + 4 target_statused (Step 2)
+      Own bench         510   6 × 85 (9 mon features + 4 × 19 move features)
+      Opp active         15   HP, 6 boosts, status, fainted, types, base stats
+      Opp bench         510   6 × 85 (9 mon features + 4 × 19 move features)
+      Opp revealed mvs   76   4 × 19 move features
+      Trapping            2   own_trapped, opp_maybe_trapped
+      Speed advantage     1   (own_spe - opp_spe) / max
+      Alive counts        2   own_alive/6, opp_alive/6
+      Volatile status     8   sub, reflect, light_screen, confused, leech_seed (Step 3)
+      Opp status threat   1   opponent has revealed status moves (Step 4)
+      Toxic counter       1   Toxic escalation counter (Step 5)
     """
     obs = []
     own = battle.active_pokemon
@@ -261,16 +341,19 @@ def embed_battle(battle) -> np.ndarray:
     obs.extend(_types(own))
     obs.extend(_base_stats(own))
 
-    # --- Own moves (4 × 10 = 40 dims) ---
+    # --- Own moves (4 × 19 + 4 = 80 dims) ---
     moves = list(own.moves.values())[:4]
     for move in moves:
         obs.extend(_move_features(move, opp))
+        # Step 2: Target already has status flag
+        obs.append(1.0 if (move.status and opp.status) else 0.0)
     for _ in range(4 - len(moves)):
         obs.extend(_MOVE_PADDING)
+        obs.append(0.0)  # target_statused padding
 
-    # --- Own bench (6 × 49 = 294 dims) ---
-    # Full info per bench Pokemon: stats, types, status, and all 4 moves with
-    # effectiveness vs current opponent. Agent can make informed switch decisions.
+    _OWN_BENCH_SLOT = 9 + 4 * _MOVE_FEATURES_PER_MOVE  # 85 dims per slot
+
+    # --- Own bench (6 × 85 = 510 dims) ---
     own_team = list(battle.team.values())
     for i in range(6):
         if i < len(own_team):
@@ -279,19 +362,16 @@ def embed_battle(battle) -> np.ndarray:
             obs.append(1.0 if mon.fainted else 0.0)
             obs.extend(_types(mon))
             obs.append(_status(mon))
-            obs.extend(_base_stats(mon))  # atk, def, spa, spe (4 dims)
-            # Bench Pokemon moves (4 × 10 = 40 dims)
+            obs.extend(_base_stats(mon))
             bench_moves = list(mon.moves.values())[:4]
             for move in bench_moves:
                 obs.extend(_move_features(move, opp))
             for _ in range(4 - len(bench_moves)):
                 obs.extend(_MOVE_PADDING)
         else:
-            obs.extend([0.0] * 65)
+            obs.extend([0.0] * _OWN_BENCH_SLOT)
 
     # --- Opponent active Pokemon (15 dims) ---
-    # Full 6 boosts (acc+eva included) — Double Team abuse is a real Gen 1 threat.
-    # Base stats always available once the Pokemon is on the field.
     obs.append(_hp(opp))
     obs.append(_boost(opp.boosts, "atk"))
     obs.append(_boost(opp.boosts, "def"))
@@ -304,9 +384,9 @@ def embed_battle(battle) -> np.ndarray:
     obs.extend(_types(opp))
     obs.extend(_base_stats(opp))
 
-    # --- Opponent bench (6 × 49 = 294 dims) ---
-    # Full info for revealed Pokemon: stats, types, and observed moves with
-    # effectiveness vs our active. Unrevealed slots are all -1/0 padding.
+    _OPP_BENCH_SLOT = 9 + 4 * _MOVE_FEATURES_PER_MOVE  # 85 dims per slot
+
+    # --- Opponent bench (6 × 85 = 510 dims) ---
     opp_team = list(battle.opponent_team.values())
     for i in range(6):
         if i < len(opp_team):
@@ -315,20 +395,16 @@ def embed_battle(battle) -> np.ndarray:
             obs.append(1.0 if mon.fainted else 0.0)
             obs.append(1.0)  # revealed = True
             obs.extend(_types(mon))
-            obs.extend(_base_stats(mon))  # atk, def, spa, spe (4 dims)
-            # Revealed moves (only moves we've seen this opponent use)
+            obs.extend(_base_stats(mon))
             opp_bench_moves = list(mon.moves.values())[:4]
             for move in opp_bench_moves:
-                obs.extend(_move_features(move, own))  # effectiveness vs OUR active
+                obs.extend(_move_features(move, own))
             for _ in range(4 - len(opp_bench_moves)):
                 obs.extend(_MOVE_PADDING)
         else:
-            obs.extend([-1.0] + [0.0] * 64)
+            obs.extend([-1.0] + [0.0] * (_OPP_BENCH_SLOT - 1))
 
-    # --- Opponent revealed moves (up to 4 × 10 = 40 dims) ---
-    # Up to 4 moves the opponent has used, each with 10 features.
-    # Effectiveness is vs own active so agent knows incoming threat level.
-    # Padding = zeros for unseen moves.
+    # --- Opponent revealed moves (4 × 19 = 76 dims) ---
     opp_revealed = list(opp.moves.values())[:4] if opp else []
     for move in opp_revealed:
         obs.extend(_move_features(move, own))
@@ -336,8 +412,6 @@ def embed_battle(battle) -> np.ndarray:
         obs.extend(_MOVE_PADDING)
 
     # --- Trapping (2 dims) ---
-    # battle.trapped: OUR active Pokemon cannot switch (e.g. being Wrapped)
-    # battle.maybe_trapped: we might be trapped (opponent has trapping move)
     obs.append(1.0 if battle.trapped else 0.0)
     obs.append(1.0 if battle.maybe_trapped else 0.0)
 
@@ -354,13 +428,45 @@ def embed_battle(battle) -> np.ndarray:
 
     # --- Alive counts (2 dims) ---
     own_alive = sum(1 for p in battle.team.values() if not p.fainted) / 6.0
-    # Unrevealed opp Pokemon are assumed alive (6 total in random battles)
     opp_alive = (6 - sum(1 for p in battle.opponent_team.values() if p.fainted)) / 6.0
     obs.append(own_alive)
     obs.append(opp_alive)
 
+    # --- Step 3: Volatile status features (8 dims) ---
+    own_effects = own.effects if hasattr(own, "effects") and own.effects else {}
+    opp_effects = opp.effects if hasattr(opp, "effects") and opp.effects else {}
+    own_side = battle.side_conditions if hasattr(battle, "side_conditions") else {}
+
+    obs.append(1.0 if Effect.SUBSTITUTE in own_effects else 0.0)
+    obs.append(1.0 if Effect.SUBSTITUTE in opp_effects else 0.0)
+    obs.append(1.0 if SideCondition.REFLECT in own_side else 0.0)
+    obs.append(1.0 if SideCondition.LIGHT_SCREEN in own_side else 0.0)
+    obs.append(1.0 if Effect.CONFUSION in own_effects else 0.0)
+    obs.append(1.0 if Effect.CONFUSION in opp_effects else 0.0)
+    obs.append(1.0 if Effect.LEECH_SEED in own_effects else 0.0)
+    obs.append(1.0 if Effect.LEECH_SEED in opp_effects else 0.0)
+
+    # --- Step 4: Opponent status move threat (1 dim) ---
+    opp_has_status = 0.0
+    with contextlib.suppress(Exception):
+        for mon in battle.opponent_team.values():
+            for m in mon.moves.values():
+                if m.category == MoveCategory.STATUS and m.status:
+                    opp_has_status = 1.0
+                    break
+            if opp_has_status:
+                break
+    obs.append(opp_has_status)
+
+    # --- Step 5: Toxic escalation counter (1 dim) ---
+    toxic_counter = 0.0
+    with contextlib.suppress(Exception):
+        if own.status == Status.TOX:
+            toxic_counter = min(own.status_counter / 15.0, 1.0)
+    obs.append(toxic_counter)
+
     result = np.array(obs, dtype=np.float32)
-    assert result.shape == (928,), f"Obs shape mismatch: expected (928,), got {result.shape}"
+    assert result.shape == (_OBS_DIM,), f"Obs shape mismatch: expected ({_OBS_DIM},), got {result.shape}"
     assert np.all(np.isfinite(result)), "Obs contains NaN/Inf"
     return result
 
@@ -369,26 +475,12 @@ class Gen1Env(SinglesEnv):
     """
     Gen 1 random battle environment for MaskablePPO.
 
-    Observation breakdown (704 dims total):
-      Own active        :  16 dims  HP, 6 boosts, status, active, fainted, types, 4 stats
-      Own moves         :  40 dims  4 moves × 10 features
-      Own bench         : 294 dims  6 × 49 (stats, types, status, 4 moves w/ effectiveness)
-      Opp active        :  15 dims  HP, 6 boosts, status, fainted, types, 4 stats
-      Opp bench         : 294 dims  6 × 49 (stats, types, revealed moves w/ effectiveness vs own)
-      Opp revealed mvs  :  40 dims  up to 4 seen opp active moves × 10 features
-      Trapping          :   2 dims  own_trapped, own_maybe_trapped
-      Speed advantage   :   1 dim   (own_spe - opp_spe) / max(own_spe, opp_spe)
-      Alive counts      :   2 dims  own_alive/6, opp_alive/6
-      * base_spe is paralysis-adjusted (PAR quarters speed in Gen 1)
+    Observation: 1222-dim float32 vector (see embed_battle docstring for layout).
     """
 
     def __init__(self, shaping_factor: float = 1.0, **kwargs):
         super().__init__(**kwargs)
-        # shaping_factor kept for callback compatibility but intentionally unused
-        # in calc_reward — reward is now clean faint differential + win/loss only.
         self.shaping_factor = shaping_factor
-        # PokeEnv.__init__ does not set observation_spaces — must be set by subclass.
-        # __setattr__ intercepts this and wraps each value in Dict(observation, action_mask).
         self.observation_spaces = {agent: self.describe_embedding() for agent in self.possible_agents}
 
     def calc_reward(self, battle) -> float:
@@ -399,8 +491,6 @@ class Gen1Env(SinglesEnv):
             status_value=0.0,
             victory_value=1.0,
         )
-        # Matchup baseline: subtract team-quality advantage from terminal reward
-        # so the agent gets more credit for winning bad matchups and less for easy ones.
         if battle.won or battle.lost:
             reward -= matchup_baseline(battle)
         return reward
@@ -409,14 +499,14 @@ class Gen1Env(SinglesEnv):
         return embed_battle(battle)
 
     def describe_embedding(self):
-        return Box(low=-1.0, high=1.0, shape=(928,), dtype=np.float32)
+        return Box(low=-1.0, high=1.0, shape=(_OBS_DIM,), dtype=np.float32)
 
 
 class SB3Wrapper(gymnasium.Wrapper):
     """
     Adapts SingleAgentWrapper's dict observations to flat numpy arrays for SB3.
 
-    SingleAgentWrapper returns obs = {"observation": array(928,), "action_mask": array(N,)}
+    SingleAgentWrapper returns obs = {"observation": array(1222,), "action_mask": array(N,)}
     This wrapper unpacks it so SB3 sees a plain Box observation and action_masks() method.
     """
 

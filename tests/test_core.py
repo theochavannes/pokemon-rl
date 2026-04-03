@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from poke_env.battle.move_category import MoveCategory
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -23,11 +24,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # ---------------------------------------------------------------------------
 
 
-def _mock_move(base_power=80, type_value=10, current_pp=15, max_pp=15, accuracy=True, effectiveness=2.0):
+def _mock_move(
+    base_power=80, type_value=10, current_pp=15, max_pp=15, accuracy=True, effectiveness=2.0, move_id="tackle"
+):
     """Create a mock Move object."""
     from poke_env.battle.move_category import MoveCategory
 
     move = MagicMock()
+    move.id = move_id
     move.base_power = base_power
     move.type.value = type_value
     move.current_pp = current_pp
@@ -81,6 +85,8 @@ def _mock_pokemon(
 
     mon.base_stats = base_stats or {"atk": 100, "def": 100, "spa": 100, "spe": 100}
     mon.moves = {f"move{i}": m for i, m in enumerate(moves or [_mock_move() for _ in range(4)])}
+    mon.effects = {}
+    mon.status_counter = 0
     return mon
 
 
@@ -111,6 +117,8 @@ def _mock_battle(own_hp=1.0, opp_hp=0.8, team_size=6, opp_team_size=3, trapped=F
 
     battle.trapped = trapped
     battle.maybe_trapped = maybe_trapped
+    battle.side_conditions = {}
+    battle.opponent_side_conditions = {}
     return battle
 
 
@@ -125,7 +133,7 @@ class TestEmbedBattle:
 
         battle = _mock_battle()
         obs = embed_battle(battle)
-        assert obs.shape == (928,), f"Expected (928,), got {obs.shape}"
+        assert obs.shape == (1222,), f"Expected (1222,), got {obs.shape}"
 
     def test_output_dtype(self):
         from src.env.gen1_env import embed_battle
@@ -153,21 +161,20 @@ class TestEmbedBattle:
 
         battle = _mock_battle(trapped=True, maybe_trapped=True)
         obs = embed_battle(battle)
-        # Trapping flags are at -5 and -4 (before speed_adv, own_alive, opp_alive)
-        assert obs[-5] == 1.0, "trapped flag should be 1.0"
-        assert obs[-4] == 1.0, "maybe_trapped flag should be 1.0"
+        # Trapping flags at -15 and -14 (before speed_adv, alive, volatile, status_threat, toxic)
+        assert obs[-15] == 1.0, "trapped flag should be 1.0"
+        assert obs[-14] == 1.0, "maybe_trapped flag should be 1.0"
 
     def test_empty_opp_bench_padding(self):
         from src.env.gen1_env import embed_battle
 
         battle = _mock_battle(opp_team_size=0)
         obs = embed_battle(battle)
-        # With 0 revealed opponents, all 6 opp bench slots should be padded
-        # Opp bench starts at: 16 (own active) + 56 (own moves) + 390 (own bench) + 15 (opp active) = 477
-        opp_bench_start = 16 + 56 + 390 + 15
-        # Each empty slot starts with -1.0
+        # Opp bench starts at: 16 (own active) + 80 (own moves) + 510 (own bench) + 15 (opp active) = 621
+        opp_bench_start = 16 + 80 + 510 + 15
+        # Each empty slot starts with -1.0, slot size = 85
         for i in range(6):
-            slot_start = opp_bench_start + i * 65
+            slot_start = opp_bench_start + i * 85
             assert obs[slot_start] == -1.0, f"Empty opp bench slot {i} should start with -1.0"
 
     def test_no_moves_pokemon(self):
@@ -178,9 +185,9 @@ class TestEmbedBattle:
         # Set own active to have 0 moves
         battle.active_pokemon.moves = {}
         obs = embed_battle(battle)
-        # Move section starts at index 16 (after own active), 56 dims total (4 * 14)
+        # Move section starts at index 16 (after own active), 80 dims total (4 × (19 + 1))
         move_start = 16
-        for i in range(56):
+        for i in range(80):
             assert obs[move_start + i] == 0.0, "Empty move slot should be 0.0"
 
     def test_various_team_sizes(self):
@@ -191,7 +198,7 @@ class TestEmbedBattle:
             for opp_size in [0, 2, 6]:
                 battle = _mock_battle(team_size=team_size, opp_team_size=opp_size)
                 obs = embed_battle(battle)
-                assert obs.shape == (928,)
+                assert obs.shape == (1222,)
                 assert np.all(np.isfinite(obs))
 
 
@@ -499,18 +506,18 @@ class TestIntegrationSmoke:
 
         # Normal battle
         obs = embed_battle(_mock_battle())
-        assert obs.shape == (928,)
+        assert obs.shape == (1222,)
 
         # Minimal teams
         obs = embed_battle(_mock_battle(team_size=1, opp_team_size=1))
-        assert obs.shape == (928,)
+        assert obs.shape == (1222,)
 
         # Fainted active (edge case)
         battle = _mock_battle()
         battle.active_pokemon.fainted = True
         battle.active_pokemon.current_hp_fraction = 0.0
         obs = embed_battle(battle)
-        assert obs.shape == (928,)
+        assert obs.shape == (1222,)
         assert obs[0] == 0.0  # HP should be 0
 
     def test_move_features_accuracy_variants(self):
@@ -649,6 +656,162 @@ class TestGraduationCheck:
             epsilon_done = temp_opps[0].temperature <= end_val + 0.05
 
         assert not epsilon_done, "Should not graduate with temperature=1.5 (end=0.1)"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 5: New feature spot-checks
+# ---------------------------------------------------------------------------
+
+
+class TestSprint5Features:
+    def test_target_statused_flag(self):
+        """Thunder Wave vs already-paralyzed opponent → target_statused=1."""
+        from poke_env.battle.status import Status
+
+        from src.env.gen1_env import embed_battle
+
+        battle = _mock_battle()
+        # Make first move a status move (Thunder Wave)
+        status_move = _mock_move(base_power=0, move_id="thunderwave")
+        status_move.category = MoveCategory.STATUS
+        status_move.status = Status.PAR
+        battle.active_pokemon.moves = {"thunderwave": status_move}
+        # Opponent is already paralyzed
+        battle.opponent_active_pokemon.status = Status.PAR
+
+        obs = embed_battle(battle)
+        # target_statused is at index 16 (own active) + 19 (first move features) = 35
+        target_statused_idx = 16 + 19  # after first move's 19 features
+        assert obs[target_statused_idx] == 1.0, "target_statused should be 1.0 for status move vs statused opp"
+
+    def test_target_statused_zero_when_no_status(self):
+        """Normal attack → target_statused=0."""
+        from src.env.gen1_env import embed_battle
+
+        battle = _mock_battle()
+        obs = embed_battle(battle)
+        # First move's target_statused (normal move, opp not statused)
+        target_statused_idx = 16 + 19
+        assert obs[target_statused_idx] == 0.0, "target_statused should be 0.0 for normal move"
+
+    def test_status_immune_poison_type(self):
+        """Toxic vs Poison-type → status_immune=1."""
+        from poke_env.battle.status import Status
+
+        from src.env.gen1_env import _move_features
+
+        toxic_move = _mock_move(base_power=0, move_id="toxic")
+        toxic_move.category = MoveCategory.STATUS
+        toxic_move.status = Status.TOX
+
+        # Poison-type opponent
+        poison_opp = _mock_pokemon()
+        poison_opp.type_1.name = "POISON"
+        poison_opp.type_2 = None
+
+        features = _move_features(toxic_move, poison_opp)
+        # status_immune is the last feature (index 18)
+        assert features[18] == 1.0, "Poison type should be immune to Toxic"
+
+    def test_status_immune_zero_for_normal(self):
+        """Toxic vs Normal-type → status_immune=0."""
+        from poke_env.battle.status import Status
+
+        from src.env.gen1_env import _move_features
+
+        toxic_move = _mock_move(base_power=0, move_id="toxic")
+        toxic_move.category = MoveCategory.STATUS
+        toxic_move.status = Status.TOX
+
+        normal_opp = _mock_pokemon()
+        normal_opp.type_1.name = "NORMAL"
+        normal_opp.type_2 = None
+
+        features = _move_features(toxic_move, normal_opp)
+        assert features[18] == 0.0, "Normal type should not be immune to Toxic"
+
+    def test_trapping_move_flag(self):
+        """Wrap should have trapping=1."""
+        from src.env.gen1_env import _move_features
+
+        wrap_move = _mock_move(base_power=15, move_id="wrap")
+        opp = _mock_pokemon()
+        features = _move_features(wrap_move, opp)
+        # trapping is at index 17
+        assert features[17] == 1.0, "Wrap should have trapping flag = 1.0"
+
+    def test_non_trapping_move_flag(self):
+        """Tackle should have trapping=0."""
+        from src.env.gen1_env import _move_features
+
+        tackle = _mock_move(base_power=40, move_id="tackle")
+        opp = _mock_pokemon()
+        features = _move_features(tackle, opp)
+        assert features[17] == 0.0, "Tackle should not have trapping flag"
+
+    def test_one_hot_category(self):
+        """Category encoding: Physical=[1,0], Special=[0,1], Status=[0,0]."""
+        from src.env.gen1_env import _move_features
+
+        opp = _mock_pokemon()
+
+        phys = _mock_move(base_power=100)
+        phys.category = MoveCategory.PHYSICAL
+        f = _move_features(phys, opp)
+        assert f[5] == 1.0 and f[6] == 0.0, "Physical: [1,0]"
+
+        spec = _mock_move(base_power=100)
+        spec.category = MoveCategory.SPECIAL
+        f = _move_features(spec, opp)
+        assert f[5] == 0.0 and f[6] == 1.0, "Special: [0,1]"
+
+        stat = _mock_move(base_power=0)
+        stat.category = MoveCategory.STATUS
+        f = _move_features(stat, opp)
+        assert f[5] == 0.0 and f[6] == 0.0, "Status: [0,0]"
+
+    def test_separate_heal_and_drain(self):
+        """Heal and drain are now separate features."""
+        from src.env.gen1_env import _move_features
+
+        opp = _mock_pokemon()
+
+        # Pure heal move (Recover)
+        recover = _mock_move(base_power=0, move_id="recover")
+        recover.category = MoveCategory.STATUS
+        recover.heal = 0.5
+        recover.drain = 0
+        f = _move_features(recover, opp)
+        assert f[10] == 0.5, "heal should be 0.5 for Recover"
+        assert f[11] == 0.0, "drain should be 0.0 for Recover"
+
+        # Drain move (Mega Drain)
+        mega_drain = _mock_move(base_power=40, move_id="megadrain")
+        mega_drain.heal = 0
+        mega_drain.drain = 0.5
+        f = _move_features(mega_drain, opp)
+        assert f[10] == 0.0, "heal should be 0.0 for Mega Drain"
+        assert f[11] == 0.5, "drain should be 0.5 for Mega Drain"
+
+    def test_volatile_status_features(self):
+        """Volatile status features appear in correct positions."""
+        from poke_env.battle.effect import Effect
+        from poke_env.battle.side_condition import SideCondition
+
+        from src.env.gen1_env import embed_battle
+
+        battle = _mock_battle()
+        battle.active_pokemon.effects = {Effect.SUBSTITUTE: 1}
+        battle.side_conditions = {SideCondition.REFLECT: 1}
+
+        obs = embed_battle(battle)
+        # Volatile status starts at -12 from end (8 volatile + 1 opp_status + 1 toxic = 10 from end, but before that is alive(2))
+        # Actually: end = trapping(2) + speed(1) + alive(2) + volatile(8) + status_threat(1) + toxic(1) = 15
+        # volatile starts at -10 from end
+        assert obs[-10] == 1.0, "own_substitute should be 1.0"
+        assert obs[-9] == 0.0, "opp_substitute should be 0.0"
+        assert obs[-8] == 1.0, "own_reflect should be 1.0"
+        assert obs[-7] == 0.0, "own_light_screen should be 0.0"
 
 
 if __name__ == "__main__":

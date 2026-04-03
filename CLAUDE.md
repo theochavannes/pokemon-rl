@@ -99,7 +99,7 @@ runs/              # Training runs (gitignored except logs)
 PLAN.md            # 6-phase implementation roadmap
 ```
 
-The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 928-dim float32 observation space, shaped rewards (fainted=0.5, victory=1.0), and action masking. All Pokemon are forced to level 100 in Showdown for training consistency.
+The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 1222-dim float32 observation space, shaped rewards (fainted=0.5, victory=1.0), and action masking. All Pokemon are forced to level 100 in Showdown for training consistency.
 
 ## Observation Space Changes — IMPORTANT
 
