@@ -55,6 +55,7 @@ PPO_KWARGS = dict(
     gamma=0.99,  # Effective horizon ~100 turns (avg game ~50 turns)
     gae_lambda=0.95,
     clip_range=0.2,
+    ent_coef=0.01,  # Entropy bonus — prevents policy collapse to a single action
     learning_rate=3e-4,
     verbose=1,
 )
@@ -64,7 +65,7 @@ CURRICULUM = [
         name="A",
         opponent_type="random",
         phase_label="Random",
-        target_wr=0.95,
+        target_wr=0.90,
         max_steps=200_000,
         shaping_factor=1.0,
     ),

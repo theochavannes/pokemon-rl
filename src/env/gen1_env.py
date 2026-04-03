@@ -266,13 +266,21 @@ class Gen1Env(SinglesEnv):
         self.observation_spaces = {agent: self.describe_embedding() for agent in self.possible_agents}
 
     def calc_reward(self, battle) -> float:
-        return self.reward_computing_helper(
+        reward = self.reward_computing_helper(
             battle,
             fainted_value=0.5 * self.shaping_factor,
             hp_value=0.5 * self.shaping_factor,
             status_value=0.1 * self.shaping_factor,
             victory_value=3.0,
         )
+        # Matchup baseline: subtract team-quality advantage from terminal reward
+        # so the agent gets more credit for winning bad matchups and less for easy ones.
+        # Only applied on terminal steps (win/loss) to avoid distorting per-turn shaping.
+        if battle.won or battle.lost:
+            from src.tier_baseline import matchup_baseline
+
+            reward -= matchup_baseline(battle)
+        return reward
 
     def embed_battle(self, battle) -> np.ndarray:
         return embed_battle(battle)

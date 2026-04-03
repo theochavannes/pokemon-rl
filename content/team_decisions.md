@@ -174,3 +174,31 @@ Zero Python logging — everything was bare `print()`. No log files written to d
 - **Dual output (print + logger):** Kept existing `print()` for console readability (progress bars, Unicode). Logger writes structured lines to file. Console uses DuplicateFilter(max=3), file uses DuplicateFilter(max=5) for more detail.
 - **Heartbeats at DEBUG level:** Per-rollout step updates go to file only (DEBUG), not console, reducing noise during long runs.
 - **poke-env raised to ERROR:** All useful battle info (win/loss, turns, actions) is already tracked by WinRateCallback. poke-env's INFO/WARNING messages about individual Pokemon are noise during training.
+
+---
+
+## 2026-04-03 — Privileged Matchup Evaluator Discussion (Expert Panel #2)
+
+### The Problem
+Agent plateaus at ~90% vs Random in Phase A. Training doesn't improve beyond the initial logit bias. Root cause: team RNG variance drowns the learning signal. Some games are unwinnable regardless of play, some are free wins — the agent can't tell the difference.
+
+### The Proposal
+A privileged evaluator that sees both full teams (information the agent never gets) and estimates win probability. Use this to scale/adjust rewards so the agent gets proper credit for skill vs. luck.
+
+### Panel: Internal team + 3 external RL experts + competitive RBY player
+
+**Key conclusions:**
+
+1. **Additive baseline, NOT multiplicative scaling.** Multiplicative changes the optimization objective (maximizes "surprise" not "winning"). Additive preserves unbiased policy gradients while reducing variance. `reward = R - baseline(teams)`.
+
+2. **Three approaches proposed (in order of effort):**
+   - **VecNormalize** (free): SB3's built-in reward + observation normalization. Doesn't capture per-matchup variance but normalizes reward scale. We weren't using this at all.
+   - **Tier-score heuristic**: Sum competitive tier ratings per team (Tauros=5, Magikarp=1). Captures ~60% of matchup variance per RBY expert. Computed retroactively from revealed Pokemon at episode end — no Showdown hooks needed.
+   - **Asymmetric actor-critic**: Privileged team features fed to value function only. Policy still acts on partial info. Used in Meta's Diplomacy AI. Requires custom SB3 policy class.
+
+3. **RBY expert insight: Type charts are NOT the main factor.** In Gen 1 randoms, matchup quality is dominated by: (a) which tier Pokemon you rolled, (b) speed tiers, (c) sleep move access, (d) special vs physical balance. A pure type-effectiveness heuristic would miss most of the signal.
+
+4. **Static vs dynamic baseline:** A start-of-game evaluator handles "I got a bad team" variance. Per-turn re-evaluation as info is revealed is what the value function should learn. They target different variance sources — complementary, not redundant.
+
+### Decision
+Phased approach: VecNormalize first (free), then tier-score heuristic baseline, then asymmetric critic only if needed.
