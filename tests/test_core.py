@@ -25,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def _mock_move(base_power=80, type_value=10, current_pp=15, max_pp=15, accuracy=True, effectiveness=2.0):
     """Create a mock Move object."""
+    from poke_env.battle.move_category import MoveCategory
+
     move = MagicMock()
     move.base_power = base_power
     move.type.value = type_value
@@ -32,7 +34,13 @@ def _mock_move(base_power=80, type_value=10, current_pp=15, max_pp=15, accuracy=
     move.max_pp = max_pp
     move.accuracy = accuracy
     move.type.damage_multiplier.return_value = effectiveness
-    move.category = MagicMock()
+    move.category = MoveCategory.PHYSICAL
+    move.status = None
+    move.priority = 0
+    move.self_boost = None
+    move.boosts = None
+    move.heal = 0
+    move.drain = 0
     return move
 
 
@@ -113,7 +121,7 @@ class TestEmbedBattle:
 
         battle = _mock_battle()
         obs = embed_battle(battle)
-        assert obs.shape == (421,), f"Expected (421,), got {obs.shape}"
+        assert obs.shape == (704,), f"Expected (704,), got {obs.shape}"
 
     def test_output_dtype(self):
         from src.env.gen1_env import embed_battle
@@ -141,8 +149,9 @@ class TestEmbedBattle:
 
         battle = _mock_battle(trapped=True, maybe_trapped=True)
         obs = embed_battle(battle)
-        assert obs[-2] == 1.0, "trapped flag should be 1.0"
-        assert obs[-1] == 1.0, "maybe_trapped flag should be 1.0"
+        # Trapping flags are at -5 and -4 (before speed_adv, own_alive, opp_alive)
+        assert obs[-5] == 1.0, "trapped flag should be 1.0"
+        assert obs[-4] == 1.0, "maybe_trapped flag should be 1.0"
 
     def test_empty_opp_bench_padding(self):
         from src.env.gen1_env import embed_battle
@@ -150,11 +159,11 @@ class TestEmbedBattle:
         battle = _mock_battle(opp_team_size=0)
         obs = embed_battle(battle)
         # With 0 revealed opponents, all 6 opp bench slots should be padded
-        # Opp bench starts at: 16 (own active) + 20 (own moves) + 174 (own bench) + 15 (opp active) = 225
-        opp_bench_start = 16 + 20 + 174 + 15
+        # Opp bench starts at: 16 (own active) + 40 (own moves) + 294 (own bench) + 15 (opp active) = 365
+        opp_bench_start = 16 + 40 + 294 + 15
         # Each empty slot starts with -1.0
         for i in range(6):
-            slot_start = opp_bench_start + i * 29
+            slot_start = opp_bench_start + i * 49
             assert obs[slot_start] == -1.0, f"Empty opp bench slot {i} should start with -1.0"
 
     def test_no_moves_pokemon(self):
@@ -165,9 +174,9 @@ class TestEmbedBattle:
         # Set own active to have 0 moves
         battle.active_pokemon.moves = {}
         obs = embed_battle(battle)
-        # Move section starts at index 16 (after own active), 20 dims total
+        # Move section starts at index 16 (after own active), 40 dims total
         move_start = 16
-        for i in range(20):
+        for i in range(40):
             assert obs[move_start + i] == 0.0, "Empty move slot should be 0.0"
 
     def test_various_team_sizes(self):
@@ -178,7 +187,7 @@ class TestEmbedBattle:
             for opp_size in [0, 2, 6]:
                 battle = _mock_battle(team_size=team_size, opp_team_size=opp_size)
                 obs = embed_battle(battle)
-                assert obs.shape == (421,)
+                assert obs.shape == (704,)
                 assert np.all(np.isfinite(obs))
 
 
@@ -486,18 +495,18 @@ class TestIntegrationSmoke:
 
         # Normal battle
         obs = embed_battle(_mock_battle())
-        assert obs.shape == (421,)
+        assert obs.shape == (704,)
 
         # Minimal teams
         obs = embed_battle(_mock_battle(team_size=1, opp_team_size=1))
-        assert obs.shape == (421,)
+        assert obs.shape == (704,)
 
         # Fainted active (edge case)
         battle = _mock_battle()
         battle.active_pokemon.fainted = True
         battle.active_pokemon.current_hp_fraction = 0.0
         obs = embed_battle(battle)
-        assert obs.shape == (421,)
+        assert obs.shape == (704,)
         assert obs[0] == 0.0  # HP should be 0
 
     def test_move_features_accuracy_variants(self):
