@@ -270,14 +270,13 @@ class Gen1Env(SinglesEnv):
     def calc_reward(self, battle) -> float:
         reward = self.reward_computing_helper(
             battle,
-            fainted_value=0.5 * self.shaping_factor,
-            hp_value=0.5 * self.shaping_factor,
-            status_value=0.1 * self.shaping_factor,
-            victory_value=3.0,
+            fainted_value=0.5,
+            hp_value=0.0,
+            status_value=0.0,
+            victory_value=1.0,
         )
         # Matchup baseline: subtract team-quality advantage from terminal reward
         # so the agent gets more credit for winning bad matchups and less for easy ones.
-        # Only applied on terminal steps (win/loss) to avoid distorting per-turn shaping.
         if battle.won or battle.lost:
             reward -= matchup_baseline(battle)
         return reward
