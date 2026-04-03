@@ -18,6 +18,7 @@ Usage:
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
@@ -122,6 +123,7 @@ def _start_server(port: int) -> subprocess.Popen:
         try:
             s = socket.create_connection(("localhost", port), timeout=1)
             s.close()
+            _time.sleep(0.5)  # Allow WebSocket handler to initialize
             return proc
         except OSError:
             _time.sleep(0.25)
@@ -204,6 +206,8 @@ async def collect(n_battles: int, teacher: str, opponent_name: str, port: int = 
     progress_task = asyncio.create_task(_log_progress())
     await collector.battle_against(opponent, n_battles=n_battles)
     progress_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await progress_task
 
     wins = collector.n_won_battles
     win_pct = (wins / n_battles * 100) if n_battles > 0 else 0.0
@@ -243,6 +247,10 @@ def collect_mixed(n_battles: int, teacher: str) -> dict:
     with ProcessPoolExecutor(max_workers=len(opp_names)) as executor:
         results = list(executor.map(_collect_worker, work))
 
+    results = [r for r in results if len(r["observations"]) > 0]
+    if not results:
+        raise RuntimeError("All workers returned empty results")
+
     return {
         "observations": np.concatenate([r["observations"] for r in results]),
         "actions": np.concatenate([r["actions"] for r in results]),
@@ -266,7 +274,11 @@ def main():
     if args.opponent == "mixed":
         data = collect_mixed(args.n_battles, args.teacher)
     else:
-        data = asyncio.run(collect(args.n_battles, args.teacher, args.opponent, args.port))
+        server = _start_server(args.port)
+        try:
+            data = asyncio.run(collect(args.n_battles, args.teacher, args.opponent, args.port))
+        finally:
+            _stop_server(server)
 
     obs = data["observations"]
     actions = data["actions"]
