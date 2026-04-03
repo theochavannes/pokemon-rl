@@ -312,3 +312,34 @@ This matches how all successful game AIs work: supervised pre-training on expert
 
 ### Future: Human Replay Data
 Showdown has a public replay API (replay.pokemonshowdown.com). Thousands of rated Gen 1 battles with real switching decisions. Would need a parsing pipeline to convert replay logs into (observation, action) pairs for BC. Significant engineering effort but unlimited expert-quality data. Bookmarked for if the heuristic teacher approach doesn't work.
+
+---
+
+## 2026-04-03 — Observation Space Gap: Agent Can't See Move Effects
+
+### The Problem
+Move features are: base_power, type, PP, effectiveness, accuracy. All status moves (Thunder Wave, Swords Dance, Toxic, Recover) appear as "0bp, type X, 100% acc" — indistinguishable from each other and indistinguishable from useless moves like Splash. The agent has zero reason to ever use a status move.
+
+This is a fundamental ceiling: even perfect RL training cannot teach the agent to use Thunder Wave if the observation gives it no way to know Thunder Wave paralyzes.
+
+### Missing Features (prioritized by competitive impact)
+
+**Tier 1 — Must have:**
+- Move category (physical/special/status): agent can't distinguish attack types
+- Status effect type (paralyze/poison/boost/heal/other): agent can't value status moves
+- Speed comparison: who goes first determines the entire turn
+
+**Tier 2 — Important:**
+- Own/opp alive counts: game state awareness
+- Move priority flag: Quick Attack, Counter
+
+**Tier 3 — Nice to have:**
+- Volatile status (confusion, leech seed, substitute, reflect)
+- Recharge/charging state (Hyper Beam, Fly)
+- Trapping state (Wrap/Bind)
+
+### Impact
+Tier 1 adds ~107 dims (421 -> 528). Breaking change for existing checkpoints but obs_transfer.py handles expansion.
+
+### Decision
+Pending — evaluating whether to expand now (before more training time is invested) or let current run_041 with SmartHeuristic BC complete first.

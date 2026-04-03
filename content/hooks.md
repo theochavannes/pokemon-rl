@@ -310,3 +310,14 @@ Every successful game AI (AlphaStar, OpenAI Five) was pre-trained on expert data
 
 ### The Fix: Teach Before Training
 Build a smarter teacher that combines MaxDamage's move selection with competitive switching strategy. Re-train BC on data that includes strategic switching. Then PPO has a starting point that actually includes the skill we want it to refine.
+
+### The Deeper Problem: The AI Doesn't Know What Its Moves Do
+**Hook:** "We realized the AI was playing Pokemon without knowing what its moves actually do."
+
+The observation space gives each move 5 features: base_power, type, PP, effectiveness, accuracy. That's it. Thunder Wave (the most important move in Gen 1) looks like "0 damage, Electric type, 100% accuracy." Swords Dance looks like "0 damage, Normal type, 100% accuracy." Recover looks like "0 damage, Normal type, 100% accuracy." They're all identical to the neural network — and all look worse than any attacking move.
+
+The agent has ZERO reason to ever use a status move. It can't tell the difference between Thunder Wave (cripples opponent permanently), Swords Dance (doubles attack power), Recover (heals 50% HP), and Splash (does literally nothing). They all look like "0bp move = bad."
+
+**Visual:** Show the 5 move features side by side for Thunder Wave, Swords Dance, Recover, and Splash. All four produce nearly identical observation vectors. "The AI thinks these four moves are the same."
+
+This is like teaching someone chess without telling them that knights can jump, bishops move diagonally, and pawns can promote. You can learn some basic strategy, but you'll never play well.
