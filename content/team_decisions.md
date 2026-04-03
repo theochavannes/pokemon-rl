@@ -405,3 +405,31 @@ Added `_is_status_immune()` check — the teacher no longer attempts Toxic on Po
 
 ### Breaking Change
 Mid-vector feature insertion. All existing checkpoints incompatible. Must retrain BC from scratch.
+
+---
+
+## 2026-04-03 — Sprint 6: Neural Network Architecture + Encoding
+
+### Two-Tower Feature Extractor
+Replaced flat MLP with a split architecture that processes own-team and opponent-team info separately before merging:
+- **Own tower**: active(16) + moves(80) + bench(510) = 606 dims → 256 → 128
+- **Opp tower**: active(15) + bench(510) + revealed(76) = 601 dims → 256 → 128
+- **Global**: 15 dims (trapping, speed, alive, volatile, status_threat, toxic)
+- **Merge**: 128 + 128 + 15 = 271 → 256 → action heads [128, 128]
+
+Total params: ~500K (up from ~300K flat MLP).
+
+### VecNormalize
+SB3's built-in observation + reward normalization. Automatically maintains running mean/std for all 1222 obs features. Save/load stats alongside model checkpoints.
+
+### Learning Rate Schedule
+Linear anneal: 3e-4 → 1e-4 over training. Higher initial LR for exploration, lower for fine-tuning.
+
+### Gradient Clipping
+max_grad_norm=0.5 explicitly set (was SB3 default but never verified).
+
+### Skipped: Learned Type Embeddings
+Incompatible with VecNormalize (embeddings need integer indices, VecNormalize would normalize them to non-integers). Float type encoding with linear projection learns a similar representation.
+
+### BC Script Updated
+Behavioral cloning now uses the same two-tower architecture so the warm-start model matches the training architecture exactly.

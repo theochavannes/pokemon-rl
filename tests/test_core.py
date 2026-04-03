@@ -814,5 +814,38 @@ class TestSprint5Features:
         assert obs[-7] == 0.0, "own_light_screen should be 0.0"
 
 
+# ---------------------------------------------------------------------------
+# Sprint 6: Two-tower feature extractor
+# ---------------------------------------------------------------------------
+
+
+class TestFeatureExtractor:
+    def test_output_shape(self):
+        """Feature extractor should produce (batch, 256) output."""
+        import torch
+        from gymnasium.spaces import Box
+
+        from src.env.feature_extractor import PokemonFeatureExtractor
+
+        obs_space = Box(low=-1.0, high=1.0, shape=(1222,), dtype=np.float32)
+        extractor = PokemonFeatureExtractor(obs_space, features_dim=256)
+
+        batch = torch.randn(4, 1222)
+        out = extractor(batch)
+        assert out.shape == (4, 256), f"Expected (4, 256), got {out.shape}"
+
+    def test_parameter_count(self):
+        """Two-tower should have more parameters than a flat MLP of same width."""
+        from gymnasium.spaces import Box
+
+        from src.env.feature_extractor import PokemonFeatureExtractor
+
+        obs_space = Box(low=-1.0, high=1.0, shape=(1222,), dtype=np.float32)
+        extractor = PokemonFeatureExtractor(obs_space, features_dim=256)
+
+        total = sum(p.numel() for p in extractor.parameters())
+        assert total > 400_000, f"Expected >400K params, got {total:,}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
