@@ -133,9 +133,8 @@ def train_bc(
     best_val_acc = 0.0
 
     for epoch in range(epochs):
-        # Shuffle training data
+        # Shuffle indices instead of copying full tensors (saves GPU memory)
         perm = torch.randperm(len(t_obs), device=device)
-        t_obs, t_act, t_mask = t_obs[perm], t_act[perm], t_mask[perm]
 
         policy.train()
         epoch_loss = 0.0
@@ -145,9 +144,10 @@ def train_bc(
         for i in range(n_batches):
             start = i * batch_size
             end = min(start + batch_size, len(t_obs))
-            b_obs = t_obs[start:end]
-            b_act = t_act[start:end]
-            b_mask = t_mask[start:end]
+            idx = perm[start:end]
+            b_obs = t_obs[idx]
+            b_act = t_act[idx]
+            b_mask = t_mask[idx]
 
             # Forward pass through the policy's action network
             features = policy.extract_features(b_obs, policy.pi_features_extractor)
