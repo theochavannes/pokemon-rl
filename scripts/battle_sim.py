@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import os
+
 os.chdir(Path(__file__).parent.parent)
 
 BATTLE_FORMAT = "gen1randombattle"
@@ -46,7 +47,9 @@ def _resolve_path(name: str) -> Path | None:
 
 def _make_player(name: str, battle_format: str, username: str):
     """Instantiate any supported agent type."""
-    import random, string
+    import random
+    import string
+
     from poke_env.ps_client.account_configuration import AccountConfiguration
 
     suffix = "".join(random.choices(string.ascii_lowercase, k=6))
@@ -55,12 +58,15 @@ def _make_player(name: str, battle_format: str, username: str):
 
     if name.lower() == "random":
         from poke_env.player.baselines import RandomPlayer
+
         return RandomPlayer(**kwargs)
     elif name.lower() == "maxdamage":
         from src.agents.heuristic_agent import MaxDamagePlayer
+
         return MaxDamagePlayer(**kwargs)
     else:
         from src.agents.policy_player import FrozenPolicyPlayer
+
         model_path = str(_resolve_path(name))
         return FrozenPolicyPlayer(model_path=model_path, **kwargs)
 
@@ -80,21 +86,18 @@ async def run_sim(agent1_name: str, agent2_name: str, n_battles: int) -> None:
     bar1 = "█" * int(wins_p1 / total * 30) if total else ""
     bar2 = "█" * int(wins_p2 / total * 30) if total else ""
 
-    print(f"\n{'─'*50}")
-    print(f"  {agent1_name:<20} {wins_p1:>3} wins  ({wins_p1/total*100:.1f}%)  {bar1}")
-    print(f"  {agent2_name:<20} {wins_p2:>3} wins  ({wins_p2/total*100:.1f}%)  {bar2}")
-    print(f"{'─'*50}")
+    print(f"\n{'─' * 50}")
+    print(f"  {agent1_name:<20} {wins_p1:>3} wins  ({wins_p1 / total * 100:.1f}%)  {bar1}")
+    print(f"  {agent2_name:<20} {wins_p2:>3} wins  ({wins_p2 / total * 100:.1f}%)  {bar2}")
+    print(f"{'─' * 50}")
     print(f"  Total battles: {total}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Pokemon RL battle simulation")
-    parser.add_argument("--agent1", required=True,
-                        help="'random', 'maxdamage', or a model name/path")
-    parser.add_argument("--agent2", required=True,
-                        help="'random', 'maxdamage', or a model name/path")
-    parser.add_argument("--n", type=int, default=20,
-                        help="Number of battles (default: 20)")
+    parser.add_argument("--agent1", required=True, help="'random', 'maxdamage', or a model name/path")
+    parser.add_argument("--agent2", required=True, help="'random', 'maxdamage', or a model name/path")
+    parser.add_argument("--n", type=int, default=20, help="Number of battles (default: 20)")
     args = parser.parse_args()
 
     asyncio.run(run_sim(args.agent1, args.agent2, args.n))

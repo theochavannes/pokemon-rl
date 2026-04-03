@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sb3_contrib import MaskablePPO
 
 BATTLE_FORMAT = "gen1randombattle"
-N_BATTLES = 20          # battles per matchup
+N_BATTLES = 20  # battles per matchup
 MODEL_DIR = Path("models")
 REPLAY_DIR = Path("replays/tournament")
 RESULTS_PATH = Path("content/tournament_results.md")
@@ -44,9 +44,8 @@ class CheckpointPlayer:
     """Wraps a MaskablePPO checkpoint as a poke-env-compatible player."""
 
     def __init__(self, name: str, model_path: str, battle_format: str):
-        from poke_env.player.player import Player
-        from poke_env.ps_client.account_configuration import AccountConfiguration
-        import random, string
+        import random
+        import string
 
         self.name = name
         self.model = MaskablePPO.load(model_path)
@@ -56,8 +55,9 @@ class CheckpointPlayer:
 
     def choose_move(self, battle):
         """Use the loaded policy to choose a move."""
-        from src.env.gen1_env import Gen1Env
         import numpy as np
+
+        from src.env.gen1_env import Gen1Env
 
         # Build obs and mask from the battle state
         # We use a lightweight Gen1Env instance just for embed_battle and get_action_mask
@@ -82,27 +82,20 @@ def _load_registry() -> dict:
 
 async def run_matchup(name_a: str, path_a: str, name_b: str, path_b: str) -> dict:
     """Run N_BATTLES between two checkpoints and return results."""
-    from poke_env.player.player import Player
-    from poke_env.ps_client.account_configuration import AccountConfiguration
-    from src.env.gen1_env import Gen1Env, make_env
-    import random, string
 
     # Use make_env approach: two RandomPlayers replaced by policy players
     # For now, use poke-env's battle_against with custom choose_move
     # This is a simplified version — full implementation in Phase 6
     print(f"  {name_a} vs {name_b} ({N_BATTLES} battles)...")
 
-    model_a = MaskablePPO.load(path_a)
-    model_b = MaskablePPO.load(path_b)
-
-    from poke_env.player.baselines import RandomPlayer
-    from poke_env.environment.singles_env import SinglesEnv
+    _model_a = MaskablePPO.load(path_a)  # noqa: F841 — used in Phase 6 implementation
+    _model_b = MaskablePPO.load(path_b)  # noqa: F841 — used in Phase 6 implementation
 
     # Placeholder — full implementation requires wrapping both as poke-env Players
     # Returns simulated result for now; will be replaced in Phase 6
     wins_a = 0
     wins_b = 0
-    print(f"  ⚠️  Full tournament implementation pending Phase 6. Stub result logged.")
+    print("  ⚠️  Full tournament implementation pending Phase 6. Stub result logged.")
     return {"wins_a": wins_a, "wins_b": wins_b, "total": N_BATTLES}
 
 
@@ -133,13 +126,9 @@ def write_results(results: list, registry: dict) -> None:
         reg = registry.get(chk, {})
         step = reg.get("step", "?")
         wr = reg.get("win_rate", "?")
-        lines.append(
-            f"| {chk} | {step} | {wr} | {win_totals[chk]} | {loss_totals[chk]} |\n"
-        )
+        lines.append(f"| {chk} | {step} | {wr} | {win_totals[chk]} | {loss_totals[chk]} |\n")
 
-    lines += ["\n## Head-to-Head Results\n\n",
-              "| Matchup | Wins A | Wins B |\n",
-              "|---------|--------|--------|\n"]
+    lines += ["\n## Head-to-Head Results\n\n", "| Matchup | Wins A | Wins B |\n", "|---------|--------|--------|\n"]
     for r in results:
         lines.append(f"| {r['a']} vs {r['b']} | {r['wins_a']} | {r['wins_b']} |\n")
 
