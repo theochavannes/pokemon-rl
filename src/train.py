@@ -213,14 +213,24 @@ def main(new_run: bool = False) -> None:
                 # Try loading BC warm-start model (pre-trained on MaxDamagePlayer)
                 bc_path = Path("models/bc_warmstart.zip")
                 if bc_path.exists():
-                    print(f"  Loading behavioral cloning warm-start from {bc_path}")
-                    model = MaskablePPO.load(
-                        str(bc_path.with_suffix("")),
-                        env=env,
-                        **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
-                        tensorboard_log=run.logs_dir,
-                    )
-                    print("  BC warm-start loaded — skipping logit bias")
+                    bc_model_path = str(bc_path.with_suffix(""))
+                    if is_compatible(bc_model_path, env.observation_space.shape[0]):
+                        print(f"  Loading behavioral cloning warm-start from {bc_path}")
+                        model = MaskablePPO.load(
+                            bc_model_path,
+                            env=env,
+                            **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
+                            tensorboard_log=run.logs_dir,
+                        )
+                        print("  BC warm-start loaded — skipping logit bias")
+                    else:
+                        print("  BC warm-start obs space mismatch — transferring weights")
+                        model = load_with_expanded_obs(
+                            old_path=bc_model_path,
+                            new_obs_dim=env.observation_space.shape[0],
+                            env=env,
+                            ppo_kwargs={**PPO_KWARGS, "tensorboard_log": run.logs_dir},
+                        )
                 else:
                     model = MaskablePPO(env=env, **{**PPO_KWARGS, "tensorboard_log": run.logs_dir})
                     # Bias policy toward moves (actions 6-9) over switches (actions 0-5).

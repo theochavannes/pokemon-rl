@@ -100,6 +100,11 @@ def train_bc(
         env=env,
         n_steps=2048,
         batch_size=64,
+        learning_rate=lr,
+        gamma=0.99,
+        gae_lambda=0.95,
+        clip_range=0.2,
+        ent_coef=0.01,
         verbose=0,
     )
     if policy_kwargs:
@@ -119,7 +124,7 @@ def train_bc(
 
     # Optimizer for the policy network only (not value function)
     optimizer = torch.optim.Adam(policy.parameters(), lr=lr)
-    n_batches = len(t_obs) // batch_size
+    n_batches = max(1, (len(t_obs) + batch_size - 1) // batch_size)  # ceil division, include tail
 
     print(f"\nTraining for {epochs} epochs, {n_batches} batches/epoch, lr={lr}")
     print(f"{'Epoch':>5} | {'Train Loss':>10} | {'Train Acc':>9} | {'Val Loss':>10} | {'Val Acc':>9}")
@@ -135,10 +140,11 @@ def train_bc(
         policy.train()
         epoch_loss = 0.0
         epoch_acc = 0.0
+        batches_processed = 0
 
         for i in range(n_batches):
             start = i * batch_size
-            end = start + batch_size
+            end = min(start + batch_size, len(t_obs))
             b_obs = t_obs[start:end]
             b_act = t_act[start:end]
             b_mask = t_mask[start:end]
@@ -157,9 +163,10 @@ def train_bc(
 
             epoch_loss += loss.item()
             epoch_acc += acc
+            batches_processed += 1
 
-        epoch_loss /= n_batches
-        epoch_acc /= n_batches
+        epoch_loss /= max(batches_processed, 1)
+        epoch_acc /= max(batches_processed, 1)
 
         # Validation
         policy.eval()

@@ -84,7 +84,8 @@ async def collect(n_battles: int) -> dict:
     await collector.battle_against(opponent, n_battles=n_battles)
 
     wins = collector.n_won_battles
-    print(f"  Done: {wins}/{n_battles} wins ({wins / n_battles * 100:.1f}%)")
+    win_pct = (wins / n_battles * 100) if n_battles > 0 else 0.0
+    print(f"  Done: {wins}/{n_battles} wins ({win_pct:.1f}%)")
     print(f"  Transitions collected: {len(collector.observations)}")
 
     return {

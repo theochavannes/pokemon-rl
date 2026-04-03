@@ -262,6 +262,8 @@ class Gen1Env(SinglesEnv):
 
     def __init__(self, shaping_factor: float = 1.0, **kwargs):
         super().__init__(**kwargs)
+        # shaping_factor kept for callback compatibility but intentionally unused
+        # in calc_reward — reward is now clean faint differential + win/loss only.
         self.shaping_factor = shaping_factor
         # PokeEnv.__init__ does not set observation_spaces — must be set by subclass.
         # __setattr__ intercepts this and wraps each value in Dict(observation, action_mask).
