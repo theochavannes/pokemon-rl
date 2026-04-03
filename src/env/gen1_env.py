@@ -367,7 +367,16 @@ def make_env(
         save_replays=save_replays,
     )
 
-    if opponent_type == "random_attacker":
+    if opponent_type == "random_damage":
+        from src.agents.heuristic_agent import RandomDamagePlayer
+
+        opponent = RandomDamagePlayer(
+            battle_format=battle_format,
+            account_configuration=AccountConfiguration(f"Puppet{env_index}{suffix}", None),
+            start_listening=False,
+            log_level=40,
+        )
+    elif opponent_type == "random_attacker":
         from src.agents.heuristic_agent import RandomAttackerPlayer
 
         opponent = RandomAttackerPlayer(
