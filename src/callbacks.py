@@ -445,7 +445,7 @@ class WinRateCallback(BaseCallback):
             opp_str = f"  [{', '.join(opp_parts)}]" if opp_parts else ""
             desync_console = f"  !desyncs={total_desyncs}" if total_desyncs > 0 else ""
             print(
-                f"  step {self.num_timesteps:>6,} │ Elo {self._elo:>6.0f} │ "
+                f"  step {self.num_timesteps:>6,} | Elo {self._elo:>6.0f} | "
                 f"vs {label}: {win_rate * 100:>5.1f}%  [{bar}]  "
                 f"avg {avg_length:.0f} turns  "
                 f"bestmv {best_move_rate:.0f}%  dmgeff {dmg_efficiency:.2f}  "
