@@ -129,7 +129,7 @@ Train the two-tower to match the flat MLP's output distribution:
 
 Code: `src/env/feature_extractor.py`
 
-```
+```text
 Observation (1559 dims)
     ├── Own tower (774 dims) → 256 → ReLU → 128 → ReLU ──┐
     ├── Opp tower (769 dims) → 256 → ReLU → 128 → ReLU ──┼── Merge (272) → 256 → ReLU

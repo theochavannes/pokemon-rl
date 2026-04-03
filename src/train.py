@@ -96,7 +96,7 @@ def main(new_run: bool = False) -> None:
 
     # Build JSON-safe config snapshot (exclude non-serializable callables/classes)
     config_snapshot = {k: v for k, v in PPO_KWARGS.items() if k not in ("policy_kwargs", "learning_rate")}
-    config_snapshot["policy_kwargs"] = "pi=[256,128] vf=[256,128]"
+    config_snapshot["policy_kwargs"] = {"net_arch": {"pi": [256, 128], "vf": [256, 128]}}
     config_snapshot["learning_rate"] = "linear_schedule(3e-4 -> 1e-4)"
 
     run = RunManager(
