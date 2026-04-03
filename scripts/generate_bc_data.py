@@ -121,10 +121,11 @@ def _merge_batches(opponent_names: list[str] | None = None) -> dict:
             if opp not in opponent_names:
                 continue
         data = np.load(f)
-        if len(data["actions"]) > 0:
-            all_obs.append(data["observations"])
-            all_acts.append(data["actions"])
-            all_masks.append(data["masks"])
+        if len(data["actions"]) == 0:
+            raise RuntimeError(f"Empty batch file {f.name} — a worker may have failed")
+        all_obs.append(data["observations"])
+        all_acts.append(data["actions"])
+        all_masks.append(data["masks"])
 
     if not all_obs:
         raise RuntimeError("No batch data found")
@@ -356,9 +357,9 @@ def _collect_worker(args: tuple) -> tuple[str, int]:
     try:
         total = asyncio.run(collect(n_battles, teacher, opponent_name, port, resume))
         return opponent_name, total
-    except Exception as e:
-        print(f"  [{opponent_name}] Worker failed: {e}")
-        return opponent_name, 0
+    except Exception:
+        log.exception("BC collection worker failed for %s", opponent_name)
+        raise
     finally:
         _stop_server(server)
 
@@ -398,6 +399,12 @@ def main():
     if args.clean and _BATCH_DIR.exists():
         shutil.rmtree(_BATCH_DIR)
         print(f"Cleaned {_BATCH_DIR}")
+
+    # Refuse to start if stale batches exist without --clean or --resume
+    if not args.clean and not args.resume and _BATCH_DIR.exists() and any(_BATCH_DIR.glob("*.npz")):
+        raise SystemExit(
+            f"Existing batch files found in {_BATCH_DIR}. Use --resume to continue or --clean to start fresh."
+        )
 
     _BATCH_DIR.mkdir(parents=True, exist_ok=True)
 
