@@ -237,3 +237,37 @@ The key insight came from the competitive player: **type charts don't predict Ge
 Root cause: the callback was reading the action mask AFTER the step executed, not before. After a forced switch completes, the new state has moves available → classified as voluntary. Every forced switch was being miscounted.
 
 **Visual:** Code diff — one line change (`self._get_action_masks()` → `self.locals["action_masks"]`).
+
+---
+
+## Act 6: The League (Sprint 3A — 2026-04-03)
+
+### The Architecture Pivot
+**Hook:** "We threw out the entire training curriculum and started over."
+
+The sequential 4-phase curriculum (Random → RandomAttacker → SoftmaxDamage → Mixed) was fundamentally flawed: each phase trained the agent for one opponent, then the next phase's new opponent erased what it learned. Classic catastrophic forgetting.
+
+**Before:** 4 phases, each with one opponent type. Agent masters each, then forgets.
+**After:** 1 phase, 4 opponents simultaneously. Every rollout includes self-play, MaxDamage, TypeMatchup, and SoftmaxDamage. The agent can never forget because every opponent is always present.
+
+**Visual:** Side-by-side training curves — old curriculum showing the "cliff" at each phase transition vs new mixed league with (hopefully) smooth improvement.
+
+### The Conservative Clipping Trick
+**Hook:** "One number change to prevent the AI from forgetting everything it learned."
+
+PPO's `clip_range` went from 0.2 to 0.1. This limits how much the policy can change per gradient update — an implicit trust region that keeps the agent close to its BC warm-start. Used in InstructGPT/ChatGPT's RLHF training for the same reason: prevent the fine-tuned model from drifting too far from its supervised starting point.
+
+**Why it's good content:** Connects our Pokemon project to state-of-the-art LLM training. "The same trick OpenAI uses to keep ChatGPT from going off the rails."
+
+### The League Roster
+**Visual:** Show all 4 opponents in a "league bracket" format:
+- **Self-Play (Env 0):** A frozen copy of the agent itself, updated every 50K steps. Starts as the BC warm-start (a MaxDamage clone). Gets progressively smarter as training continues.
+- **MaxDamagePlayer (Env 1):** Always picks the highest-damage move. Pure aggression.
+- **TypeMatchupPlayer (Env 2):** Switches to type advantages. Forces the agent to handle smart switching.
+- **SoftmaxDamagePlayer (Env 3):** Probabilistic damage selection, temperature anneals from random-ish (2.0) to near-deterministic (0.1) based on the agent's win rate.
+
+### What to Watch For
+- Does BestMv% stay above 70%? (BC knowledge preserved)
+- Does Vol.Switch% start increasing? (TypeMatchup forcing switching decisions)
+- Does the agent beat all heuristics at >50% within 500K steps?
+- Does the self-play opponent matter, or does the agent just learn from heuristics?

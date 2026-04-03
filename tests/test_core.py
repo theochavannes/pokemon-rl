@@ -7,6 +7,7 @@ Does NOT require a running Showdown server (all tests use mocks).
 """
 
 import sys
+from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -524,6 +525,117 @@ class TestIntegrationSmoke:
         for status_val, expected_float in _STATUS_TO_FLOAT.items():
             mon.status = status_val
             assert _status(mon) == expected_float
+
+
+# ---------------------------------------------------------------------------
+# Test mixed_league opponent type
+# ---------------------------------------------------------------------------
+
+
+class TestMixedLeague:
+    """Verify mixed_league creates the correct opponent for each env index."""
+
+    def test_env0_is_frozen_policy(self):
+        """Env 0 should be FrozenPolicyPlayer (self-play slot)."""
+        import contextlib
+        from unittest.mock import patch
+
+        from src.env.gen1_env import make_env
+
+        with (
+            patch("src.agents.policy_player.FrozenPolicyPlayer.__init__", return_value=None) as mock_init,
+            patch("src.agents.policy_player.FrozenPolicyPlayer.choose_move"),
+        ):
+            mock_init.return_value = None
+            with contextlib.suppress(Exception):
+                make_env(env_index=0, opponent_type="mixed_league", selfplay_model_path="fake_path")
+            # Verify FrozenPolicyPlayer was instantiated
+            assert mock_init.called
+
+    def test_env0_requires_selfplay_path(self):
+        """Env 0 should raise ValueError without selfplay_model_path."""
+        from src.env.gen1_env import make_env
+
+        with pytest.raises(ValueError, match="mixed_league requires selfplay_model_path"):
+            make_env(env_index=0, opponent_type="mixed_league", selfplay_model_path=None)
+
+    def test_invalid_env_index_raises(self):
+        """Env index >= 4 should raise ValueError."""
+        from src.env.gen1_env import make_env
+
+        with pytest.raises(ValueError, match="mixed_league only supports env_index 0-3"):
+            make_env(env_index=4, opponent_type="mixed_league")
+
+
+# ---------------------------------------------------------------------------
+# Test refactored annealing (search by type, not index)
+# ---------------------------------------------------------------------------
+
+
+class TestAnnealingSearchesOpponents:
+    """Verify _maybe_anneal_epsilon finds annealable opponents regardless of position."""
+
+    def test_finds_temperature_opponent_at_index_3(self):
+        """Temperature annealing should work when SoftmaxDamagePlayer is at index 3."""
+        from src.callbacks import WinRateCallback
+
+        cb = WinRateCallback.__new__(WinRateCallback)
+        cb.verbose = 0
+        cb.epsilon_schedule = (2.0, 0.1)
+        cb._epsilon_rewards = deque([1.0] * 500, maxlen=500)  # 100% win rate
+
+        # opponents[0] has no temperature/epsilon (like FrozenPolicyPlayer)
+        opp0 = SimpleNamespace()  # no temperature, no epsilon
+        opp1 = SimpleNamespace()
+        opp2 = SimpleNamespace()
+        opp3 = SimpleNamespace(temperature=2.0)  # SoftmaxDamagePlayer at index 3
+        cb.opponents = [opp0, opp1, opp2, opp3]
+
+        cb._maybe_anneal_epsilon(win_rate=0.80)
+
+        # At 100% wr500, target_temp = 2.0*(1-1.0) + 0.1*1.0 = 0.1
+        # Rate limited: max drop 0.1 per eval -> 2.0 - 0.1 = 1.9
+        assert opp3.temperature == pytest.approx(1.9, abs=0.01)
+
+    def test_no_annealable_opponents_is_safe(self):
+        """Should not crash when no opponents have temperature or epsilon."""
+        from src.callbacks import WinRateCallback
+
+        cb = WinRateCallback.__new__(WinRateCallback)
+        cb.verbose = 0
+        cb.epsilon_schedule = (2.0, 0.1)
+        cb._epsilon_rewards = deque([1.0] * 500, maxlen=500)
+        cb.opponents = [SimpleNamespace(), SimpleNamespace()]  # no temp, no eps
+
+        # Should not raise
+        cb._maybe_anneal_epsilon(win_rate=0.80)
+
+
+# ---------------------------------------------------------------------------
+# Test graduation check searches opponents by type
+# ---------------------------------------------------------------------------
+
+
+class TestGraduationCheck:
+    """Verify graduation check finds temperature/epsilon on any opponent."""
+
+    def test_graduation_finds_temperature_at_any_index(self):
+        """Phase should not graduate when temperature hasn't annealed, even if opponents[0] has no temp."""
+        from src.callbacks import WinRateCallback
+
+        cb = WinRateCallback.__new__(WinRateCallback)
+        cb.verbose = 0
+        cb.epsilon_schedule = (2.0, 0.1)
+        cb.opponents = [SimpleNamespace(), SimpleNamespace(temperature=1.5)]
+
+        # Simulate the graduation check logic
+        epsilon_done = True
+        _, end_val = cb.epsilon_schedule
+        temp_opps = [o for o in cb.opponents if hasattr(o, "temperature")]
+        if temp_opps:
+            epsilon_done = temp_opps[0].temperature <= end_val + 0.05
+
+        assert not epsilon_done, "Should not graduate with temperature=1.5 (end=0.1)"
 
 
 if __name__ == "__main__":

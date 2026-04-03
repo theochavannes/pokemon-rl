@@ -234,3 +234,31 @@ PPO was eroding the BC policy — BestMv% dropped from 82% to 64% over 130K step
 Plus KL penalty against BC policy to prevent forgetting, and BC regression tests.
 
 Full ranked list of 35 ideas in notes/panel4_full_conversation.md
+
+---
+
+## 2026-04-03 — Sprint 3A: Mixed League Implementation
+
+### The Shift: Sequential Curriculum → Simultaneous League
+
+**Before (4 phases):** Random → RandomAttacker → SoftmaxDamage → Mixed+Self. Each phase trains against one opponent type until graduation, then moves on. Problem: skills learned in one phase erode in the next (catastrophic forgetting). The agent beats Random, then forgets how to play once it faces MaxDamage.
+
+**After (1 phase, 4 envs):** All opponents every rollout.
+| Env | Opponent | What It Tests |
+|-----|----------|--------------|
+| 0 | FrozenPolicyPlayer (BC warm-start) | Self-play — can it beat itself? |
+| 1 | MaxDamagePlayer (pure) | Raw damage output |
+| 2 | TypeMatchupPlayer (pure) | Type-aware switching |
+| 3 | SoftmaxDamagePlayer (temp 2.0→0.1) | Smooth difficulty ramp |
+
+### Anti-Forgetting: Conservative Clipping
+`clip_range` lowered from 0.2 to 0.1. This is a well-known trick from RLHF literature (InstructGPT used it) — acts as an implicit KL constraint, limiting how far the policy can drift per PPO update. Preserves BC knowledge without needing an explicit KL penalty term.
+
+### Self-Play Snapshots
+Every 50K steps, the current model is frozen as the new self-play opponent and saved to `league/snapshot_NNNN.zip`. This builds a library of past selves for potential future fictitious self-play.
+
+### Per-Opponent Win Rate Tracking
+New TensorBoard metrics: `train/wr_SelfPlay`, `train/wr_MaxDmg`, `train/wr_TypeMatch`, `train/wr_SoftmaxDmg`. Also printed in console eval lines. Critical for diagnosing whether the agent is improving broadly or just beating one opponent type.
+
+### Expanded Team
+Sprint 3A assembled the largest team yet: core 11 agents plus 5 new specialists (second code reviewer, academic RL expert, DeepMind RL expert, staff engineer, test engineer). 16 experts total for 4 files changed.

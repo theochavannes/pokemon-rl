@@ -452,6 +452,32 @@ def make_env(
             start_listening=False,
             log_level=40,
         )
+    elif opponent_type == "mixed_league":
+        # Fixed opponent-per-env mapping: diverse opponents every rollout
+        _puppet_cfg = AccountConfiguration(f"Puppet{env_index}{suffix}", None)
+        _puppet_kw = dict(
+            battle_format=battle_format, account_configuration=_puppet_cfg, start_listening=False, log_level=40
+        )
+        if env_index == 0:
+            from src.agents.policy_player import FrozenPolicyPlayer
+
+            if selfplay_model_path is None:
+                raise ValueError("mixed_league requires selfplay_model_path for env 0 (self-play slot)")
+            opponent = FrozenPolicyPlayer(model_path=selfplay_model_path, **_puppet_kw)
+        elif env_index == 1:
+            from src.agents.heuristic_agent import MaxDamagePlayer
+
+            opponent = MaxDamagePlayer(**_puppet_kw)
+        elif env_index == 2:
+            from src.agents.heuristic_agent import TypeMatchupPlayer
+
+            opponent = TypeMatchupPlayer(**_puppet_kw)
+        elif env_index == 3:
+            from src.agents.heuristic_agent import SoftmaxDamagePlayer
+
+            opponent = SoftmaxDamagePlayer(temperature=opponent_difficulty, **_puppet_kw)
+        else:
+            raise ValueError(f"mixed_league only supports env_index 0-3, got {env_index}")
     elif opponent_type == "mixed":
         from src.agents.heuristic_agent import (
             EpsilonAggressiveSwitcher,
