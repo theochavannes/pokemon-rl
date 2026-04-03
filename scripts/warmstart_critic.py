@@ -58,14 +58,15 @@ class ValueDataCollector(SmartHeuristicPlayer):
         self.all_returns: list[float] = []
 
     def choose_move(self, battle):
+        # Compute reward for the PREVIOUS observation (transition that led here)
+        current_value = self._state_value(battle)
+        if self._episode_obs:
+            self._episode_rewards.append(current_value - self._prev_value)
+        self._prev_value = current_value
+
+        # Record current observation
         obs = embed_battle(battle)
         self._episode_obs.append(obs)
-
-        # Compute step reward as delta from previous state value
-        current_value = self._state_value(battle)
-        step_reward = current_value - self._prev_value
-        self._episode_rewards.append(step_reward)
-        self._prev_value = current_value
 
         # Use the BC policy to pick the action
         obs_tensor = torch.tensor(obs, dtype=torch.float32, device=self.model.policy.device).unsqueeze(0)
@@ -102,17 +103,19 @@ class ValueDataCollector(SmartHeuristicPlayer):
     def _battle_finished_callback(self, battle):
         super()._battle_finished_callback(battle)
 
-        # Add the terminal reward
-        terminal_reward = self._state_value(battle) - self._prev_value
-        if self._episode_rewards:
-            self._episode_rewards[-1] += terminal_reward
-        elif self._episode_obs:
+        # Add the terminal reward for the last observation
+        if self._episode_obs:
+            terminal_reward = self._state_value(battle) - self._prev_value
             self._episode_rewards.append(terminal_reward)
 
         # Compute discounted returns
         if self._episode_obs:
+            if len(self._episode_obs) != len(self._episode_rewards):
+                raise ValueError(
+                    f"obs/reward length mismatch: {len(self._episode_obs)} vs {len(self._episode_rewards)}"
+                )
             gamma = 0.99
-            returns = np.zeros(len(self._episode_rewards))
+            returns = np.zeros(len(self._episode_rewards), dtype=np.float32)
             g = 0.0
             for t in reversed(range(len(self._episode_rewards))):
                 g = self._episode_rewards[t] + gamma * g
@@ -176,11 +179,12 @@ async def collect_value_data(
         ),
     ]
 
-    games_per_opp = n_games // len(opponents)
-    for opp in opponents:
+    base_games, extra = divmod(n_games, len(opponents))
+    for i, opp in enumerate(opponents):
+        n_battles = base_games + (1 if i < extra else 0)
         opp_name = opp.__class__.__name__
-        print(f"  Playing {games_per_opp} games vs {opp_name}...")
-        await collector.battle_against(opp, n_battles=games_per_opp)
+        print(f"  Playing {n_battles} games vs {opp_name}...")
+        await collector.battle_against(opp, n_battles=n_battles)
         wins = sum(1 for b in collector.battles.values() if b.won)
         total = len(collector.battles)
         print(f"    Record so far: {wins}/{total} ({wins / total * 100:.0f}%)")
@@ -215,12 +219,11 @@ def train_critic(
     v_obs = torch.tensor(obs[val_idx], device=device)
     v_ret = torch.tensor(returns[val_idx], device=device).unsqueeze(1)
 
-    # Only optimize value function parameters
-    vf_params = (
-        list(policy.vf_features_extractor.parameters())
-        + list(policy.mlp_extractor.value_net.parameters())
-        + list(policy.value_net.parameters())
-    )
+    # Only optimize value function parameters (skip shared features_extractor
+    # to avoid corrupting the BC-trained actor's feature weights)
+    vf_params = list(policy.mlp_extractor.value_net.parameters()) + list(policy.value_net.parameters())
+    if not getattr(policy, "share_features_extractor", True):
+        vf_params = list(policy.vf_features_extractor.parameters()) + vf_params
     optimizer = torch.optim.Adam(vf_params, lr=lr)
 
     n_batches = max(1, (len(t_obs) + batch_size - 1) // batch_size)
@@ -231,6 +234,7 @@ def train_critic(
     print("-" * 35)
 
     best_val_loss = float("inf")
+    best_state = None
 
     for epoch in range(epochs):
         perm = torch.randperm(len(t_obs), device=device)
@@ -272,12 +276,17 @@ def train_critic(
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            best_state = {k: v.clone() for k, v in policy.state_dict().items()}
             marker = " *"
         else:
             marker = ""
 
         if (epoch + 1) % 5 == 0 or epoch == 0 or marker:
             print(f"{epoch + 1:>5} | {epoch_loss:>10.4f} | {val_loss:>10.4f}{marker}")
+
+    # Restore best weights
+    if best_state is not None:
+        policy.load_state_dict(best_state)
 
     print(f"\nBest validation MSE: {best_val_loss:.4f}")
     return best_val_loss
