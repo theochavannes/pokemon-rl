@@ -24,7 +24,7 @@ We run MaxDamagePlayer vs RandomPlayer for thousands of games. At every turn whe
 
 3. **Action mask** (10 booleans): Which of the 10 actions are currently legal. For example, if we only have 2 moves with PP remaining and 3 living bench Pokemon, only those 5 actions are True.
 
-This gives us a dataset of ~200,000 (observation, action, mask) tuples from ~5,000 games.
+This gives us a dataset of ~142,000 (observation, action, mask) tuples from 5,000 games.
 
 ### Step 2: Train the Policy via Supervised Learning
 

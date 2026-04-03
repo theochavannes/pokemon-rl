@@ -33,6 +33,8 @@ total_loss = ppo_loss + 0.1 * aux_loss  # small weight, don't dominate RL
 
 ## Step 2: Feature grouping / lightweight attention
 
+**Note:** Dimensions below assume the current 421-dim obs. If obs features are expanded (e.g., KO ratio, speed comparison from the fix-agent-learning branch), adjust accordingly.
+
 Replace the flat MLP with a structured architecture:
 
 ```

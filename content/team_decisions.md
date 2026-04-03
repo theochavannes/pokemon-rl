@@ -217,6 +217,8 @@ Phased approach: VecNormalize first (free), then tier-score heuristic baseline, 
 PPO was eroding the BC policy — BestMv% dropped from 82% to 64% over 130K steps. Root cause: noisy advantages (from bad value function) + entropy bonus push toward uniform policy. Fixes applied:
 - Reward simplified to faint differential + win/loss only (removed HP/status noise)
 - Learning rate lowered from 3e-4 to 1e-4
+- Dynamic entropy: ent_coef auto-increases (up to 0.1) when win rate <10%, auto-decreases (down to 0.01) when >50%. Prevents death spiral by forcing exploration when stuck.
+- RandomDamagePlayer added as midpoint opponent (random moves, never switches) — fills gap between RandomPlayer and SoftmaxDamagePlayer
 
 ### Panel #4: Post-BC Training Strategy
 14-expert panel (including DeepMind AlphaStar engineer, CMU professor, 2 Smogon RBY champions).

@@ -21,7 +21,7 @@ CURRICULUM = [
 ]
 ```
 
-In `make_env()`, add a new `opponent_type="mixed_league"`:
+In `make_env()`, add a new `opponent_type="mixed_league"` (needs to be implemented):
 - Env 0: Self-play (FrozenPolicyPlayer from BC warm-start, swapped every 50K steps)
 - Env 1: MaxDamagePlayer
 - Env 2: TypeMatchupPlayer
@@ -79,7 +79,7 @@ Start with the manual approach. Automate later if needed.
 ## Step 4: Self-play opponent swap
 
 The self-play opponent (env 0) should update periodically:
-- Use the existing `OpponentSwapCallback` logic
+- Use the existing self-play swap logic (in `selfplay_train.py`'s `OpponentSwapCallback` or `WinRateCallback._evaluate()`)
 - Swap every 50K steps (or when win rate against self > 70%)
 - Save snapshots to `models/league/snapshot_NNNN.zip` for future fictitious self-play
 
