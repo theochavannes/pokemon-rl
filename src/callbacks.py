@@ -460,24 +460,40 @@ class WinRateCallback(BaseCallback):
         # Update frozen self-play opponent every 50K steps
         if self.selfplay_path and self.num_timesteps - self._last_selfplay_update >= 50_000:
             self._last_selfplay_update = self.num_timesteps
-            self.model.save(self.selfplay_path)
-            for opp in self.opponents:
-                if hasattr(opp, "swap_model"):
-                    opp.swap_model(self.selfplay_path)
-            # Update self-play opponent Elo to match current agent
-            self._opp_elo[0] = self._elo
-            log.info("SelfPlay: frozen opponent updated (step %d, Elo %.0f)", self.num_timesteps, self._elo)
-            if self.verbose:
-                print(f"  [SelfPlay] Frozen opponent updated (step {self.num_timesteps}, Elo {self._elo:.0f})")
-            # Save numbered snapshot for future fictitious self-play
+            # Save current model as numbered snapshot
             league_dir = Path(self.save_path) / "league"
             league_dir.mkdir(exist_ok=True)
             snapshot_num = self.num_timesteps // 1000
             snapshot_path = str(league_dir / f"snapshot_{snapshot_num:04d}")
             self.model.save(snapshot_path)
-            log.info("SelfPlay: saved league/snapshot_%04d", snapshot_num)
+
+            # Sprint 7 Step 8: Self-play population — randomly pick from league pool
+            import random as _rng
+
+            snapshots = sorted(league_dir.glob("snapshot_*.zip"))
+            if snapshots:
+                chosen = _rng.choice(snapshots)  # noqa: S311
+                chosen_path = str(chosen.with_suffix(""))
+            else:
+                chosen_path = self.selfplay_path
+            self.model.save(self.selfplay_path)  # always save latest as default
+            for opp in self.opponents:
+                if hasattr(opp, "swap_model"):
+                    opp.swap_model(chosen_path)
+            self._opp_elo[0] = self._elo
+            chosen_name = Path(chosen_path).stem if snapshots else "latest"
+            log.info(
+                "SelfPlay: opponent=%s (pool=%d, step %d, Elo %.0f)",
+                chosen_name,
+                len(snapshots),
+                self.num_timesteps,
+                self._elo,
+            )
             if self.verbose:
-                print(f"  [SelfPlay] Saved league/snapshot_{snapshot_num:04d}")
+                print(
+                    f"  [SelfPlay] Opponent={chosen_name} (pool={len(snapshots)}, "
+                    f"step {self.num_timesteps}, Elo {self._elo:.0f})"
+                )
 
         # Save best model -- keep timestamped copy + symlink-style "best_model"
         if win_rate > self._best_win_rate and n >= self.window // 2:
