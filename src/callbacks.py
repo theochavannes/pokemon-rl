@@ -157,14 +157,15 @@ class WinRateCallback(BaseCallback):
     def _move_damages_from_obs(obs: np.ndarray) -> np.ndarray:
         """Extract expected damage proxy for each of 4 moves from the observation.
 
-        Own moves start at index 16, with 10 features per move:
+        Own moves start at index 16, with 14 features per move:
           [base_power, type_index, pp_fraction, effectiveness, accuracy,
-           category, status_effect, priority, self_boost, heal]
+           category, status_effect, priority, self_boost, heal,
+           secondary_chance, recoil, self_destruct, fixed_damage]
         Expected damage proxy = base_power * effectiveness * 4.0  (undo normalization)
         """
         damages = np.zeros(4)
         for i in range(4):
-            base = 16 + i * 10
+            base = 16 + i * 14
             bp = obs[base]  # base_power / 150
             eff = obs[base + 3]  # effectiveness / 4
             damages[i] = bp * eff * 4.0  # rough damage proxy

@@ -342,4 +342,29 @@ This is a fundamental ceiling: even perfect RL training cannot teach the agent t
 Tier 1 adds ~107 dims (421 -> 528). Breaking change for existing checkpoints but obs_transfer.py handles expansion.
 
 ### Decision
-Pending — evaluating whether to expand now (before more training time is invested) or let current run_041 with SmartHeuristic BC complete first.
+Implemented: expanded 421->704 in sprint 3A. But run_043 showed same plateau — agent never learned to use new features because BC teacher doesn't use status moves and [64,64] NN can't process 704 dims effectively. Led to second expansion (see below).
+
+---
+
+## 2026-04-03 — Obs Space + NN Architecture Overhaul (Expert Panel)
+
+### Panel: 2 RL Researchers + 2 Smogon Competitive RBY Players
+
+**Additional move features needed (4 per move):**
+- secondary_status_chance: Body Slam 30% para, Blizzard 10% freeze (PERMANENT in Gen 1)
+- recoil: Take Down 25%, Double-Edge 25%
+- self_destruct: Explosion/Self-Destruct kill your own mon
+- fixed_damage: Seismic Toss = level damage (always 100), shows as 0bp otherwise
+
+Obs: 704 -> 928 dims (14 features per move slot).
+
+**NN architecture upgrade:**
+- [64,64] shared extractor (63K params) -> [256,128] separate pi/vf (~300K params)
+- batch_size 64 -> 128 for gradient stability with larger network
+- First layer was bottlenecking: 704+ features squeezed through 64 neurons
+
+**SmartHeuristicPlayer updated to use status moves:**
+Without status move demonstrations in BC data, the new obs features are noise. Teacher updated to use Thunder Wave, Swords Dance, Recover, Toxic.
+
+### Key Insight from Smogon Players
+Secondary effects dominate Gen 1. Body Slam (85bp + 30% para) > Strength (100bp) in nearly every situation. Blizzard (120bp + 10% PERMANENT freeze) is the best move in the game. Without encoding these probabilities, the agent can never learn why pros prefer these moves.

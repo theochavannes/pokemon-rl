@@ -48,9 +48,10 @@ BATTLE_FORMAT = "gen1randombattle"
 N_ENVS = 4
 
 PPO_KWARGS = dict(
-    policy="MlpPolicy",  # [64, 64] MLP — tested [128,128] and [256,256], both worse
+    policy="MlpPolicy",
+    policy_kwargs=dict(net_arch=dict(pi=[256, 128], vf=[256, 128])),  # separate pi/vf networks
     n_steps=2048,
-    batch_size=64,
+    batch_size=128,  # larger batch for gradient stability with bigger network
     n_epochs=10,
     gamma=0.99,  # Effective horizon ~100 turns (avg game ~50 turns)
     gae_lambda=0.95,

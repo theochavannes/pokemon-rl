@@ -41,6 +41,10 @@ def _mock_move(base_power=80, type_value=10, current_pp=15, max_pp=15, accuracy=
     move.boosts = None
     move.heal = 0
     move.drain = 0
+    move.entry = {"secondary": None}
+    move.recoil = 0
+    move.self_destruct = None
+    move.damage = 0
     return move
 
 
@@ -121,7 +125,7 @@ class TestEmbedBattle:
 
         battle = _mock_battle()
         obs = embed_battle(battle)
-        assert obs.shape == (704,), f"Expected (704,), got {obs.shape}"
+        assert obs.shape == (928,), f"Expected (928,), got {obs.shape}"
 
     def test_output_dtype(self):
         from src.env.gen1_env import embed_battle
@@ -159,11 +163,11 @@ class TestEmbedBattle:
         battle = _mock_battle(opp_team_size=0)
         obs = embed_battle(battle)
         # With 0 revealed opponents, all 6 opp bench slots should be padded
-        # Opp bench starts at: 16 (own active) + 40 (own moves) + 294 (own bench) + 15 (opp active) = 365
-        opp_bench_start = 16 + 40 + 294 + 15
+        # Opp bench starts at: 16 (own active) + 56 (own moves) + 390 (own bench) + 15 (opp active) = 477
+        opp_bench_start = 16 + 56 + 390 + 15
         # Each empty slot starts with -1.0
         for i in range(6):
-            slot_start = opp_bench_start + i * 49
+            slot_start = opp_bench_start + i * 65
             assert obs[slot_start] == -1.0, f"Empty opp bench slot {i} should start with -1.0"
 
     def test_no_moves_pokemon(self):
@@ -174,9 +178,9 @@ class TestEmbedBattle:
         # Set own active to have 0 moves
         battle.active_pokemon.moves = {}
         obs = embed_battle(battle)
-        # Move section starts at index 16 (after own active), 40 dims total
+        # Move section starts at index 16 (after own active), 56 dims total (4 * 14)
         move_start = 16
-        for i in range(40):
+        for i in range(56):
             assert obs[move_start + i] == 0.0, "Empty move slot should be 0.0"
 
     def test_various_team_sizes(self):
@@ -187,7 +191,7 @@ class TestEmbedBattle:
             for opp_size in [0, 2, 6]:
                 battle = _mock_battle(team_size=team_size, opp_team_size=opp_size)
                 obs = embed_battle(battle)
-                assert obs.shape == (704,)
+                assert obs.shape == (928,)
                 assert np.all(np.isfinite(obs))
 
 
@@ -495,18 +499,18 @@ class TestIntegrationSmoke:
 
         # Normal battle
         obs = embed_battle(_mock_battle())
-        assert obs.shape == (704,)
+        assert obs.shape == (928,)
 
         # Minimal teams
         obs = embed_battle(_mock_battle(team_size=1, opp_team_size=1))
-        assert obs.shape == (704,)
+        assert obs.shape == (928,)
 
         # Fainted active (edge case)
         battle = _mock_battle()
         battle.active_pokemon.fainted = True
         battle.active_pokemon.current_hp_fraction = 0.0
         obs = embed_battle(battle)
-        assert obs.shape == (704,)
+        assert obs.shape == (928,)
         assert obs[0] == 0.0  # HP should be 0
 
     def test_move_features_accuracy_variants(self):

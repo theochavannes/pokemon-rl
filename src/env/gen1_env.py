@@ -3,16 +3,16 @@ Gen 1 (RBY) Gymnasium environment.
 
 Wraps poke-env's SinglesEnv for use with MaskablePPO.
 
-Observation space : Box(-1, 1, shape=(704,), float32)
+Observation space : Box(-1, 1, shape=(928,), float32)
 Action space      : Discrete — provided by SinglesEnv, masked via action_masks()
 Reward            : Shaped (fainted/HP/status deltas) + ±3.0 terminal victory bonus
 
 Env stack for training:
     Gen1Env (SinglesEnv subclass)
         ↓
-    SingleAgentWrapper   obs = {"observation": np.array(704,), "action_mask": np.array(N,)}
+    SingleAgentWrapper   obs = {"observation": np.array(928,), "action_mask": np.array(N,)}
         ↓
-    SB3Wrapper           obs = np.array(704,)  +  action_masks() -> bool array
+    SB3Wrapper           obs = np.array(928,)  +  action_masks() -> bool array
         ↓
     DummyVecEnv / SubprocVecEnv
 """
@@ -35,8 +35,8 @@ _GEN1_TYPE_CHART = GenData.from_gen(1).type_chart
 
 _STATUS_TO_FLOAT = {
     None: 0.0,
-    Status.PSN: 0.2,
-    Status.TOX: 0.2,  # Toxic → treated as Poison in Gen 1
+    Status.PSN: 0.15,
+    Status.TOX: 0.3,  # Toxic is much stronger (escalating damage each turn)
     Status.BRN: 0.4,
     Status.SLP: 0.6,
     Status.PAR: 0.8,
@@ -58,15 +58,15 @@ def _hp(pokemon) -> float:
 
 
 _MOVE_STATUS_MAP = {
-    Status.PSN: 0.2,
-    Status.TOX: 0.2,
+    Status.PSN: 0.15,
+    Status.TOX: 0.3,  # Toxic is much stronger than regular poison (escalating damage)
     Status.BRN: 0.4,
     Status.SLP: 0.6,
     Status.PAR: 0.8,
     Status.FRZ: 1.0,
 }
 
-_MOVE_FEATURES_PER_MOVE = 10
+_MOVE_FEATURES_PER_MOVE = 14
 _MOVE_PADDING = [0.0] * _MOVE_FEATURES_PER_MOVE
 
 
@@ -137,6 +137,29 @@ def _move_features(move, opponent) -> list:
         if move.drain and move.drain > 0:
             heal_val = max(heal_val, move.drain)
 
+    # Secondary status chance (Body Slam 30% para, Blizzard 10% freeze, etc.)
+    secondary_chance = 0.0
+    with contextlib.suppress(Exception):
+        entry_sec = move.entry.get("secondary")
+        if entry_sec and "chance" in entry_sec:
+            secondary_chance = entry_sec["chance"] / 100.0
+
+    # Recoil fraction (Submission 0.25, Double-Edge 0.25)
+    recoil_val = 0.0
+    with contextlib.suppress(Exception):
+        recoil_val = move.recoil if move.recoil else 0.0
+
+    # Self-destruct flag (Explosion, Self-Destruct)
+    self_destruct = 1.0 if move.self_destruct else 0.0
+
+    # Fixed damage (Seismic Toss = "level" = 100 in our config, Dragon Rage = 40)
+    fixed_damage = 0.0
+    with contextlib.suppress(Exception):
+        if move.damage == "level":
+            fixed_damage = 1.0  # always 100 damage at level 100
+        elif isinstance(move.damage, int | float) and move.damage > 0:
+            fixed_damage = move.damage / 100.0
+
     return [
         base_power,
         type_index,
@@ -148,6 +171,10 @@ def _move_features(move, opponent) -> list:
         priority,
         self_boost_val,
         heal_val,
+        secondary_chance,
+        recoil_val,
+        self_destruct,
+        fixed_damage,
     ]
 
 
@@ -182,7 +209,7 @@ def _base_stats(pokemon) -> list:
 
 def embed_battle(battle) -> np.ndarray:
     """
-    Produces a 704-dim float32 observation from a poke-env Battle object.
+    Produces a 928-dim float32 observation from a poke-env Battle object.
 
     All Pokemon are forced to level 100 in our Showdown config, so level is
     omitted (always 1.0). Speed in base_stats is paralysis-adjusted (PAR
@@ -256,7 +283,7 @@ def embed_battle(battle) -> np.ndarray:
             for _ in range(4 - len(bench_moves)):
                 obs.extend(_MOVE_PADDING)
         else:
-            obs.extend([0.0] * 49)
+            obs.extend([0.0] * 65)
 
     # --- Opponent active Pokemon (15 dims) ---
     # Full 6 boosts (acc+eva included) — Double Team abuse is a real Gen 1 threat.
@@ -292,7 +319,7 @@ def embed_battle(battle) -> np.ndarray:
             for _ in range(4 - len(opp_bench_moves)):
                 obs.extend(_MOVE_PADDING)
         else:
-            obs.extend([-1.0] + [0.0] * 48)
+            obs.extend([-1.0] + [0.0] * 64)
 
     # --- Opponent revealed moves (up to 4 × 10 = 40 dims) ---
     # Up to 4 moves the opponent has used, each with 10 features.
@@ -329,7 +356,7 @@ def embed_battle(battle) -> np.ndarray:
     obs.append(opp_alive)
 
     result = np.array(obs, dtype=np.float32)
-    assert result.shape == (704,), f"Obs shape mismatch: expected (704,), got {result.shape}"
+    assert result.shape == (928,), f"Obs shape mismatch: expected (928,), got {result.shape}"
     assert np.all(np.isfinite(result)), "Obs contains NaN/Inf"
     return result
 
@@ -378,14 +405,14 @@ class Gen1Env(SinglesEnv):
         return embed_battle(battle)
 
     def describe_embedding(self):
-        return Box(low=-1.0, high=1.0, shape=(704,), dtype=np.float32)
+        return Box(low=-1.0, high=1.0, shape=(928,), dtype=np.float32)
 
 
 class SB3Wrapper(gymnasium.Wrapper):
     """
     Adapts SingleAgentWrapper's dict observations to flat numpy arrays for SB3.
 
-    SingleAgentWrapper returns obs = {"observation": array(704,), "action_mask": array(N,)}
+    SingleAgentWrapper returns obs = {"observation": array(928,), "action_mask": array(N,)}
     This wrapper unpacks it so SB3 sees a plain Box observation and action_masks() method.
     """
 

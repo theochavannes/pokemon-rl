@@ -321,3 +321,10 @@ The agent has ZERO reason to ever use a status move. It can't tell the differenc
 **Visual:** Show the 5 move features side by side for Thunder Wave, Swords Dance, Recover, and Splash. All four produce nearly identical observation vectors. "The AI thinks these four moves are the same."
 
 This is like teaching someone chess without telling them that knights can jump, bishops move diagonally, and pawns can promote. You can learn some basic strategy, but you'll never play well.
+
+### The Brain Too Small for the Job
+**Hook:** "We were trying to teach a brain the size of a walnut to play chess."
+
+The neural network had 63,000 parameters trying to process 704 features. The first layer compressed 704 inputs through 64 neurons — an 11:1 ratio. For comparison, image classifiers compress at 3:1. We upgraded to 300K parameters with [256, 128] layers — 5x the capacity. Combined with encoding what moves actually DO (secondary effects, recoil, self-destruct), the agent can finally see the full game.
+
+**Visual:** Side-by-side network diagrams. Old: 704->64->64->10 (tiny funnel). New: 928->256->128->10 (proper pyramid). "Same game, 5x the brain."
