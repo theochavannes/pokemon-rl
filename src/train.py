@@ -119,7 +119,7 @@ def main(new_run: bool = False) -> None:
         # Restore epsilon from saved progress if resuming this phase
         if progress.get("phase") == phase["name"] and "epsilon" in progress:
             epsilon_start = progress["epsilon"]
-            print(f"  Resuming with ε={epsilon_start:.2f} (from saved progress)")
+            print(f"  Resuming with eps={epsilon_start:.2f} (from saved progress)")
 
         # Calculate remaining steps if resuming mid-phase
         remaining_steps = phase["max_steps"]
@@ -133,11 +133,11 @@ def main(new_run: bool = False) -> None:
         )
         print(f"  Reward shaping: {shaping:.0%}")
         if epsilon_start is not None:
-            print(f"  Opponent ε: {epsilon_start} → {phase.get('epsilon_end', 0.0)} (anneals on win rate)")
+            print(f"  Opponent eps: {epsilon_start} -> {phase.get('epsilon_end', 0.0)} (anneals on win rate)")
         selfplay_path = str(Path(run.models_dir) / "selfplay_frozen") if phase.get("selfplay") else None
         if selfplay_path:
             print("  Self-play: ON (frozen opponent updated every 200 battles)")
-        print(f"  Replays → {replay_dir}")
+        print(f"  Replays -> {replay_dir}")
         print(f"{'=' * 60}\n")
 
         # Save current best as initial frozen opponent for self-play
@@ -213,7 +213,7 @@ def main(new_run: bool = False) -> None:
                             before = model.policy.action_net.bias.data[:6].mean().item()
                             model.policy.action_net.bias.data[:6] *= 0.5
                             after = model.policy.action_net.bias.data[:6].mean().item()
-                            print(f"  BC warm-start loaded — switch bias halved: {before:.2f} → {after:.2f}")
+                            print(f"  BC warm-start loaded -- switch bias halved: {before:.2f} -> {after:.2f}")
                     else:
                         print("  BC warm-start obs space mismatch — transferring weights")
                         model = load_with_expanded_obs(
@@ -307,7 +307,7 @@ def main(new_run: bool = False) -> None:
 
         phase_path = str(Path(run.models_dir) / f"phase_{phase['name']}_final")
         model.save(phase_path)
-        print(f"\n  Phase {phase['name']} complete → {phase_path}.zip")
+        print(f"\n  Phase {phase['name']} complete -> {phase_path}.zip")
 
         # Clear resume state for next phase
         resume_path = None

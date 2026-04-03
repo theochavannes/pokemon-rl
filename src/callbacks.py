@@ -10,7 +10,7 @@ WinRateCallback:
   - Appends milestone events to content/hooks.md
 
 Win rate is derived from terminal episode rewards:
-    +1.0 → win   |   -1.0 → loss   (no draws in gen1randombattle)
+    +1.0 -> win   |   -1.0 -> loss   (no draws in gen1randombattle)
 """
 
 import json
@@ -434,7 +434,7 @@ class WinRateCallback(BaseCallback):
             )
 
         if self.verbose:
-            bar = "█" * int(win_rate * 20) + "░" * (20 - int(win_rate * 20))
+            bar = "#" * int(win_rate * 20) + "-" * (20 - int(win_rate * 20))
             ev_str = f"  ev={expl_var:.2f}" if not np.isnan(expl_var) else ""
             # Per-opponent breakdown (windowed)
             opp_parts = []
@@ -443,7 +443,7 @@ class WinRateCallback(BaseCallback):
                     opp_wr = float(np.mean(list(self._per_env_results[idx]))) * 100
                     opp_parts.append(f"{lbl}={opp_wr:.0f}%")
             opp_str = f"  [{', '.join(opp_parts)}]" if opp_parts else ""
-            desync_console = f"  ⚠desyncs={total_desyncs}" if total_desyncs > 0 else ""
+            desync_console = f"  !desyncs={total_desyncs}" if total_desyncs > 0 else ""
             print(
                 f"  step {self.num_timesteps:>6,} │ Elo {self._elo:>6.0f} │ "
                 f"vs {label}: {win_rate * 100:>5.1f}%  [{bar}]  "
@@ -607,14 +607,14 @@ class WinRateCallback(BaseCallback):
         log.info("Snapped %d replays -> replays/notable/ (step %s, wr=%.3f)", len(replay_files), step_label, win_rate)
         if self.verbose:
             print(
-                f"[MEDIA]  Snapped {len(replay_files)} replays → "
+                f"[MEDIA]  Snapped {len(replay_files)} replays -> "
                 f"replays/notable/ (step {step_label}, wr={win_rate:.3f})"
             )
 
     def _write_checkpoint_metadata(self, win_rate: float, avg_length: float) -> None:
         """
         Append a metadata entry to models/checkpoint_registry.json.
-        Each entry maps a checkpoint filename → stats at the time of saving.
+        Each entry maps a checkpoint filename -> stats at the time of saving.
         Used by tournament and comparison scripts to select agents.
         """
         registry_path = Path(self.save_path) / "checkpoint_registry.json"
@@ -723,7 +723,9 @@ class WinRateCallback(BaseCallback):
                     opp.temperature = new_temp
                 log.info("Curriculum: temperature %.2f -> %.2f (wr500=%.2f)", current_temp, new_temp, eps_win_rate)
                 if self.verbose:
-                    print(f"  [Curriculum] temperature: {current_temp:.2f} → {new_temp:.2f} (wr500={eps_win_rate:.2f})")
+                    print(
+                        f"  [Curriculum] temperature: {current_temp:.2f} -> {new_temp:.2f} (wr500={eps_win_rate:.2f})"
+                    )
         elif eps_opps:
             current_eps = eps_opps[0].epsilon
             target_eps = max(min(1.0 - eps_win_rate, eps_start), eps_end)
@@ -735,7 +737,7 @@ class WinRateCallback(BaseCallback):
                     opp.epsilon = new_eps
                 log.info("Curriculum: epsilon %.2f -> %.2f (wr500=%.2f)", current_eps, new_eps, eps_win_rate)
                 if self.verbose:
-                    print(f"  [Curriculum] epsilon: {current_eps:.2f} → {new_eps:.2f} (wr500={eps_win_rate:.2f})")
+                    print(f"  [Curriculum] epsilon: {current_eps:.2f} -> {new_eps:.2f} (wr500={eps_win_rate:.2f})")
 
     def _nearest_milestone(self) -> int | None:
         for m in _REPLAY_MILESTONES:

@@ -97,17 +97,21 @@ def _make_collector_cls(base_cls):
 
 
 async def collect(n_battles: int, teacher: str, opponent_name: str) -> dict:
+    import random as _rnd
+    import string as _str
+
+    suffix = "".join(_rnd.choices(_str.ascii_lowercase, k=6))
     collector_cls = _make_collector_cls(_TEACHER_CLS[teacher])
     collector = collector_cls(
         battle_format=BATTLE_FORMAT,
-        account_configuration=AccountConfiguration("BCCollector", None),
+        account_configuration=AccountConfiguration(f"BC{suffix}", None),
         max_concurrent_battles=10,
         log_level=40,
     )
     opp_cls = _OPPONENT_CLS[opponent_name]
     opponent = opp_cls(
         battle_format=BATTLE_FORMAT,
-        account_configuration=AccountConfiguration("BCOpponent", None),
+        account_configuration=AccountConfiguration(f"BCOpp{suffix}", None),
         max_concurrent_battles=10,
         log_level=40,
     )
