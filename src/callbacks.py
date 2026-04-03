@@ -136,6 +136,14 @@ class WinRateCallback(BaseCallback):
         self._per_env_results: list[deque] = [deque(maxlen=100) for _ in range(4)]
         self._per_env_labels: list[str] = ["SelfPlay", "MaxDmg", "TypeMatch", "SoftmaxDmg"]
 
+        # Elo rating — single number to track agent progress
+        # Opponent ratings calibrated from heuristic strength:
+        #   SelfPlay starts at agent's rating (mirror match)
+        #   SoftmaxDmg at high temp is weakest, TypeMatch is hardest
+        self._elo: float = 1000.0
+        self._opp_elo: list[float] = [1000.0, 1300.0, 1500.0, 1100.0]
+        #                              SelfPlay MaxDmg  TypeMatch SoftmaxDmg
+
     def _on_training_start(self) -> None:
         self.content_log.parent.mkdir(parents=True, exist_ok=True)
         self._write_content_log_header()
@@ -212,7 +220,11 @@ class WinRateCallback(BaseCallback):
 
                 # Per-opponent tracking (DummyVecEnv: env_idx maps to opponent)
                 if env_idx < len(self._per_env_results):
-                    self._per_env_results[env_idx].append(1.0 if reward >= 0.5 else 0.0)
+                    won = reward >= 0.5
+                    self._per_env_results[env_idx].append(1.0 if won else 0.0)
+                    # Elo update (K=16 for stable progression)
+                    expected = 1.0 / (1.0 + 10.0 ** ((self._opp_elo[env_idx] - self._elo) / 400.0))
+                    self._elo += 16.0 * ((1.0 if won else 0.0) - expected)
 
                 # Log first 10 episodes individually so user sees something early
                 if self._total_episodes <= 10:
@@ -355,6 +367,7 @@ class WinRateCallback(BaseCallback):
             if len(self._per_env_results[idx]) > 0:
                 opp_wr = float(np.mean(list(self._per_env_results[idx])))
                 self.logger.record(f"train/wr_{lbl}", opp_wr, exclude=_tb_only)
+        self.logger.record("train/elo", self._elo, exclude=_tb_only)
         # Desync tracking — how many battles ended in forfeit due to ValueError
         total_desyncs = 0
         if self._env and hasattr(self._env, "envs"):
@@ -432,7 +445,7 @@ class WinRateCallback(BaseCallback):
             opp_str = f"  [{', '.join(opp_parts)}]" if opp_parts else ""
             desync_console = f"  ⚠desyncs={total_desyncs}" if total_desyncs > 0 else ""
             print(
-                f"  step {self.num_timesteps:>6,} │ "
+                f"  step {self.num_timesteps:>6,} │ Elo {self._elo:>6.0f} │ "
                 f"vs {label}: {win_rate * 100:>5.1f}%  [{bar}]  "
                 f"avg {avg_length:.0f} turns  "
                 f"bestmv {best_move_rate:.0f}%  dmgeff {dmg_efficiency:.2f}  "
@@ -447,9 +460,11 @@ class WinRateCallback(BaseCallback):
             for opp in self.opponents:
                 if hasattr(opp, "swap_model"):
                     opp.swap_model(self.selfplay_path)
-            log.info("SelfPlay: frozen opponent updated (step %d)", self.num_timesteps)
+            # Update self-play opponent Elo to match current agent
+            self._opp_elo[0] = self._elo
+            log.info("SelfPlay: frozen opponent updated (step %d, Elo %.0f)", self.num_timesteps, self._elo)
             if self.verbose:
-                print(f"  [SelfPlay] Frozen opponent updated (step {self.num_timesteps})")
+                print(f"  [SelfPlay] Frozen opponent updated (step {self.num_timesteps}, Elo {self._elo:.0f})")
             # Save numbered snapshot for future fictitious self-play
             league_dir = Path(self.save_path) / "league"
             league_dir.mkdir(exist_ok=True)
@@ -539,6 +554,7 @@ class WinRateCallback(BaseCallback):
 
         row = (
             f"| {self.num_timesteps:>7} "
+            f"| {self._elo:>4.0f} "
             f"| {win_rate:.3f} "
             f"| {avg_length:>5.1f} "
             f"| {best_move_rate:>5.1f}% "
@@ -736,8 +752,8 @@ class WinRateCallback(BaseCallback):
             f"\n## Phase vs {label}\n\n"
             f"Started: {date}  \n"
             f"Target: {target * 100:.0f}% win rate\n\n"
-            f"| Step    | Win Rate | Avg Turns | BestMv% | DmgEff | ExplVar | Vol.Sw% | Forced% | Temp  | Per-Opponent WR          | Episodes |\n"
-            f"|---------|----------|-----------|---------|--------|---------|---------|---------|-------|--------------------------|----------|\n"
+            f"| Step    | Elo  | Win Rate | Avg Turns | BestMv% | DmgEff | ExplVar | Vol.Sw% | Forced% | Temp  | Per-Opponent WR          | Episodes |\n"
+            f"|---------|------|----------|-----------|---------|--------|---------|---------|---------|-------|--------------------------|----------|\n"
         )
         mode = "a" if self.content_log.exists() else "w"
         with open(self.content_log, mode, encoding="utf-8") as f:
