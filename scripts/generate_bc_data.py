@@ -117,12 +117,36 @@ async def collect(n_battles: int, teacher: str, opponent_name: str) -> dict:
     )
 
     print(f"Collecting data: {teacher} vs {opponent_name} ({n_battles} games)...")
+
+    # Progress logging — poll battle count periodically
+    async def _log_progress():
+        import time
+
+        start = time.time()
+        last_count = 0
+        while True:
+            await asyncio.sleep(5)
+            done = collector.n_finished_battles
+            transitions = len(collector.observations)
+            elapsed = time.time() - start
+            rate = done / elapsed if elapsed > 0 else 0
+            if done != last_count:
+                print(
+                    f"  [{opponent_name}] {done}/{n_battles} battles "
+                    f"({transitions:,} transitions, {rate:.1f} battles/s)"
+                )
+                last_count = done
+            if done >= n_battles:
+                break
+
+    progress_task = asyncio.create_task(_log_progress())
     await collector.battle_against(opponent, n_battles=n_battles)
+    progress_task.cancel()
 
     wins = collector.n_won_battles
     win_pct = (wins / n_battles * 100) if n_battles > 0 else 0.0
-    print(f"  Done: {wins}/{n_battles} wins ({win_pct:.1f}%)")
-    print(f"  Transitions collected: {len(collector.observations)}")
+    print(f"  [{opponent_name}] Done: {wins}/{n_battles} wins ({win_pct:.1f}%)")
+    print(f"  [{opponent_name}] Transitions collected: {len(collector.observations)}")
 
     return {
         "observations": np.array(collector.observations),
