@@ -302,11 +302,92 @@ class EpsilonAggressiveSwitcher(_EpsilonMixin, AggressiveSwitcher):
     pass
 
 
+# ---------------------------------------------------------------------------
+# SmartHeuristicPlayer — competitive-informed: MaxDamage moves + strategic switching
+# Implements 5 rules from Gen 1 competitive analysis:
+#   1. Switch when walled (best move does < 15% estimated damage)
+#   2. Switch at severe type disadvantage (2x+ weak to opponent's types)
+#   3. Switch into resistance (bench mon resists opponent better)
+#   4. Don't switch into KO range (skip low-HP bench mons)
+#   5. Cap switching at ~20% of turns (avoid tempo loss)
+# Used as BC teacher to train agents that can both attack AND switch.
+# ---------------------------------------------------------------------------
+
+
+class SmartHeuristicPlayer(Player):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._turn_count: int = 0
+        self._switch_count: int = 0
+
+    def choose_move(self, battle):
+        self._turn_count += 1
+        opp = battle.opponent_active_pokemon
+        own = battle.active_pokemon
+
+        # MaxDamage-style move selection — find best damage move
+        best_move = None
+        best_dmg = 0.0
+        if battle.available_moves:
+            best_move = max(battle.available_moves, key=lambda m: _expected_damage(m, opp))
+            best_dmg = _expected_damage(best_move, opp)
+
+        # --- Switching decision (competitive rules) ---
+        should_switch = False
+
+        if battle.available_switches:
+            # Rule 5: Cap switching at ~20% (avoid tempo loss)
+            switch_rate = self._switch_count / max(self._turn_count, 1)
+            if switch_rate < 0.20:
+                # Rule 1: Switch when walled — best move does negligible damage
+                # 15% threshold: base_power * effectiveness < ~22 (out of 150 scale)
+                if best_dmg < 22.0:
+                    should_switch = True
+
+                # Rule 2: Severe type disadvantage — opponent's types are super effective
+                if not should_switch:
+                    own_vs_opp = _type_advantage(own, opp)
+                    # _type_advantage returns negative = good defense. Very positive = bad.
+                    # Threshold: sum of type multipliers > 2.0 means we're taking heavy hits
+                    if own_vs_opp > 2.0:
+                        should_switch = True
+
+        if should_switch and battle.available_switches:
+            # Rule 3: Pick the best switch target — must resist opponent
+            # Rule 4: Skip low-HP mons (don't switch into KO range)
+            viable = [p for p in battle.available_switches if p.current_hp_fraction > 0.3]
+            if not viable:
+                viable = battle.available_switches  # fallback to any alive mon
+
+            # Best switch = best defensive matchup against opponent
+            best_switch = min(viable, key=lambda p: _type_advantage(p, opp))
+
+            # Only switch if the bench mon actually resists better than current
+            if _type_advantage(best_switch, opp) < _type_advantage(own, opp) - 0.5:
+                self._switch_count += 1
+                return self.create_order(best_switch)
+
+        # Default: MaxDamage-style attack
+        if best_move and best_dmg > 0:
+            return self.create_order(best_move)
+
+        # No good attack — try any move
+        if battle.available_moves:
+            return self.create_order(best_move)
+
+        # No moves at all — switch to healthiest
+        if battle.available_switches:
+            return self.create_order(max(battle.available_switches, key=lambda p: p.current_hp_fraction))
+
+        return self.choose_random_move(battle)
+
+
 __all__ = [
     "MaxDamagePlayer",
     "TypeMatchupPlayer",
     "StallPlayer",
     "AggressiveSwitcher",
+    "SmartHeuristicPlayer",
     "EpsilonMaxDamagePlayer",
     "EpsilonTypeMatchupPlayer",
     "EpsilonStallPlayer",

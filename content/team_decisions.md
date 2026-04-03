@@ -309,3 +309,6 @@ Approach: Build a competitive-informed heuristic that combines strong move selec
 
 ### Key Insight
 This matches how all successful game AIs work: supervised pre-training on expert data → RL fine-tuning. The pre-training establishes the behavioral repertoire. If the expert data lacks a skill, RL alone won't discover it.
+
+### Future: Human Replay Data
+Showdown has a public replay API (replay.pokemonshowdown.com). Thousands of rated Gen 1 battles with real switching decisions. Would need a parsing pipeline to convert replay logs into (observation, action) pairs for BC. Significant engineering effort but unlimited expert-quality data. Bookmarked for if the heuristic teacher approach doesn't work.
