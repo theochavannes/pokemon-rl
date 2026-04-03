@@ -192,15 +192,19 @@ def _types(pokemon) -> list:
 def _base_stats(pokemon) -> list:
     """
     Normalized base Atk, Def, Special, Speed — species constants (not level-adjusted).
-    Speed is paralysis-adjusted: PAR quarters speed in Gen 1 independently of stage boosts.
-    This is NOT captured in pokemon.boosts["spe"], so must be applied here explicitly.
+    Gen 1 status adjustments applied explicitly (not captured in pokemon.boosts):
+      - PAR quarters Speed (independently of stage boosts)
+      - BRN halves Attack (independently of stage boosts)
     """
     bs = pokemon.base_stats
+    atk = bs.get("atk", 0) / _STAT_SCALE
     spe = bs.get("spe", 0) / _STAT_SCALE
     if pokemon.status == Status.PAR:
         spe *= _PAR_SPEED_MULT
+    if pokemon.status == Status.BRN:
+        atk *= 0.5  # Burn halves physical Attack in Gen 1
     return [
-        bs.get("atk", 0) / _STAT_SCALE,
+        atk,
         bs.get("def", 0) / _STAT_SCALE,
         bs.get("spa", 0) / _STAT_SCALE,
         spe,
