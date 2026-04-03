@@ -53,7 +53,7 @@ class ValueDataCollector(SmartHeuristicPlayer):
         self.model = model
         self._episode_obs: list[np.ndarray] = []
         self._episode_rewards: list[float] = []
-        self._prev_reward: float = 0.0
+        self._prev_value: float = 0.0
         self.all_obs: list[np.ndarray] = []
         self.all_returns: list[float] = []
 
@@ -61,11 +61,11 @@ class ValueDataCollector(SmartHeuristicPlayer):
         obs = embed_battle(battle)
         self._episode_obs.append(obs)
 
-        # Compute step reward as delta from cumulative reward
-        cumulative = self.calc_reward(battle)
-        step_reward = cumulative - self._prev_reward
+        # Compute step reward as delta from previous state value
+        current_value = self._state_value(battle)
+        step_reward = current_value - self._prev_value
         self._episode_rewards.append(step_reward)
-        self._prev_reward = cumulative
+        self._prev_value = current_value
 
         # Use the BC policy to pick the action
         obs_tensor = torch.tensor(obs, dtype=torch.float32, device=self.model.policy.device).unsqueeze(0)
@@ -83,20 +83,27 @@ class ValueDataCollector(SmartHeuristicPlayer):
 
         return SinglesEnv.action_to_order(action, battle)
 
-    def calc_reward(self, battle) -> float:
-        return self.reward_computing_helper(
-            battle,
-            fainted_value=0.5,
-            hp_value=0.0,
-            status_value=0.0,
-            victory_value=1.0,
-        )
+    @staticmethod
+    def _state_value(battle) -> float:
+        """Compute absolute state value (not delta) matching Gen1Env reward params."""
+        value = 0.0
+        for mon in battle.team.values():
+            if mon.fainted:
+                value -= 0.5
+        for mon in battle.opponent_team.values():
+            if mon.fainted:
+                value += 0.5
+        if battle.won:
+            value += 1.0
+        elif battle.lost:
+            value -= 1.0
+        return value
 
     def _battle_finished_callback(self, battle):
         super()._battle_finished_callback(battle)
 
         # Add the terminal reward
-        terminal_reward = self.calc_reward(battle) - self._prev_reward
+        terminal_reward = self._state_value(battle) - self._prev_value
         if self._episode_rewards:
             self._episode_rewards[-1] += terminal_reward
         elif self._episode_obs:
@@ -117,7 +124,7 @@ class ValueDataCollector(SmartHeuristicPlayer):
         # Reset for next episode
         self._episode_obs = []
         self._episode_rewards = []
-        self._prev_reward = 0.0
+        self._prev_value = 0.0
 
 
 async def collect_value_data(
