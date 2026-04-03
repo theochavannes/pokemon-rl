@@ -83,7 +83,6 @@ class WinRateCallback(BaseCallback):
         shaping_decay_battles: int = 5000,
         global_episodes_offset: int = 0,
         env=None,
-        vecnormalize_path: str | None = None,
     ):
         super().__init__(verbose)
         self.selfplay_path = selfplay_path
@@ -92,7 +91,6 @@ class WinRateCallback(BaseCallback):
         self.shaping_decay_battles = shaping_decay_battles
         self.global_episodes_offset = global_episodes_offset  # battles from previous phases
         self._env = env
-        self._vecnormalize_path = vecnormalize_path
         self.window = window
         self.eval_freq = eval_freq
         self.eval_freq_episodes = eval_freq_episodes
@@ -505,8 +503,6 @@ class WinRateCallback(BaseCallback):
             self.model.save(os.path.join(self.save_path, snapshot_name))
             # Latest best (always points to the current best, for easy loading)
             self.model.save(os.path.join(self.save_path, "best_model"))
-            # Save VecNormalize stats alongside model
-            self._save_vecnormalize()
             log.info("New best win_rate=%.3f — saved %s", win_rate, snapshot_name)
             if self.verbose:
                 print(f"[WinRate] New best {win_rate:.3f} — saved {snapshot_name}")
@@ -664,13 +660,6 @@ class WinRateCallback(BaseCallback):
         with open(registry_path, "w") as f:
             json.dump(registry, f, indent=2)
 
-    def _save_vecnormalize(self) -> None:
-        """Save VecNormalize stats alongside model checkpoints."""
-        if self._vecnormalize_path and self.model and hasattr(self.model, "get_env"):
-            vec_env = self.model.get_env()
-            if vec_env is not None and hasattr(vec_env, "save"):
-                vec_env.save(self._vecnormalize_path)
-
     def _decay_shaping(self) -> None:
         """Linearly decay reward shaping from 1.0 to 0.0 over shaping_decay_battles (global)."""
         if not self._env or not self.shaping_decay_battles:
@@ -680,10 +669,8 @@ class WinRateCallback(BaseCallback):
         new_factor = max(1.0 - progress, 0.0)
 
         # Update shaping_factor on all env instances
-        # Reach through VecNormalize wrapper to DummyVecEnv if needed
-        inner_vec = self._env.venv if hasattr(self._env, "venv") else self._env
-        if hasattr(inner_vec, "envs"):
-            for e in inner_vec.envs:
+        if hasattr(self._env, "envs"):
+            for e in self._env.envs:
                 # Navigate wrapper chain: Monitor -> SB3Wrapper -> SingleAgentWrapper -> Gen1Env
                 inner = e
                 while hasattr(inner, "env"):

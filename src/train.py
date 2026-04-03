@@ -30,10 +30,9 @@ import logging
 import torch
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import CheckpointCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from src.callbacks import WinRateCallback
-from src.env.feature_extractor import PokemonFeatureExtractor
 from src.env.gen1_env import make_env
 from src.logging_config import setup_logging
 from src.obs_transfer import is_compatible, load_with_expanded_obs
@@ -56,18 +55,14 @@ def _lr_schedule(progress_remaining: float) -> float:
 
 PPO_KWARGS = dict(
     policy="MlpPolicy",
-    policy_kwargs=dict(
-        features_extractor_class=PokemonFeatureExtractor,
-        features_extractor_kwargs=dict(features_dim=256),
-        net_arch=dict(pi=[128], vf=[128]),  # smaller heads — extractor does heavy lifting
-    ),
+    policy_kwargs=dict(net_arch=dict(pi=[256, 128], vf=[256, 128])),
     n_steps=2048,
     batch_size=128,
     n_epochs=10,
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
-    max_grad_norm=0.5,  # gradient clipping for stability with larger network
+    max_grad_norm=0.5,
     ent_coef=0.01,
     learning_rate=_lr_schedule,  # 3e-4 → 1e-4 linear anneal
     verbose=1,
@@ -101,7 +96,7 @@ def main(new_run: bool = False) -> None:
 
     # Build JSON-safe config snapshot (exclude non-serializable callables/classes)
     config_snapshot = {k: v for k, v in PPO_KWARGS.items() if k not in ("policy_kwargs", "learning_rate")}
-    config_snapshot["policy_kwargs"] = "PokemonFeatureExtractor(256) + pi=[128] vf=[128]"
+    config_snapshot["policy_kwargs"] = "pi=[256,128] vf=[256,128]"
     config_snapshot["learning_rate"] = "linear_schedule(3e-4 -> 1e-4)"
 
     run = RunManager(
@@ -194,17 +189,7 @@ def main(new_run: bool = False) -> None:
             for i in range(N_ENVS)
         ]
         # DummyVecEnv when we need opponent access (epsilon annealing), SubprocVecEnv otherwise
-        raw_env = DummyVecEnv(env_fns) if epsilon_start is not None or N_ENVS == 1 else SubprocVecEnv(env_fns)
-
-        # VecNormalize: zero-mean unit-variance obs + reward normalization
-        vecnorm_path = Path(run.models_dir) / "vecnormalize.pkl"
-        if vecnorm_path.exists():
-            print(f"  Loading VecNormalize stats from {vecnorm_path}")
-            env = VecNormalize.load(str(vecnorm_path), raw_env)
-            env.training = True
-            env.norm_reward = True
-        else:
-            env = VecNormalize(raw_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+        env = DummyVecEnv(env_fns) if epsilon_start is not None or N_ENVS == 1 else SubprocVecEnv(env_fns)
 
         if model is None:
             if resume_path:
@@ -275,11 +260,9 @@ def main(new_run: bool = False) -> None:
         print()
 
         # Collect opponent refs for epsilon annealing + selfplay swap (DummyVecEnv only)
-        # env is VecNormalize wrapping DummyVecEnv — reach through to the inner envs
         opponents = []
-        inner_vec = env.venv if hasattr(env, "venv") else env
-        if hasattr(inner_vec, "envs"):
-            for e in inner_vec.envs:
+        if hasattr(env, "envs"):
+            for e in env.envs:
                 if hasattr(e, "_opponent"):
                     opponents.append(e._opponent)
 
@@ -306,7 +289,6 @@ def main(new_run: bool = False) -> None:
             shaping_decay_battles=5000,
             global_episodes_offset=global_episodes,
             env=env,
-            vecnormalize_path=str(vecnorm_path),
         )
         checkpoint_cb = CheckpointCallback(
             save_freq=50_000,
@@ -338,7 +320,6 @@ def main(new_run: bool = False) -> None:
 
         phase_path = str(Path(run.models_dir) / f"phase_{phase['name']}_final")
         model.save(phase_path)
-        env.save(str(vecnorm_path))  # Save VecNormalize stats for resume
         print(f"\n  Phase {phase['name']} complete -> {phase_path}.zip")
 
         # Clear resume state for next phase

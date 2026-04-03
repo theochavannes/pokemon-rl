@@ -105,14 +105,14 @@ async def collect(n_battles: int, teacher: str, opponent_name: str) -> dict:
     collector = collector_cls(
         battle_format=BATTLE_FORMAT,
         account_configuration=AccountConfiguration(f"BC{suffix}", None),
-        max_concurrent_battles=10,
+        max_concurrent_battles=100,
         log_level=40,
     )
     opp_cls = _OPPONENT_CLS[opponent_name]
     opponent = opp_cls(
         battle_format=BATTLE_FORMAT,
         account_configuration=AccountConfiguration(f"BCOpp{suffix}", None),
-        max_concurrent_battles=10,
+        max_concurrent_battles=100,
         log_level=40,
     )
 
@@ -132,20 +132,15 @@ async def collect(n_battles: int, teacher: str, opponent_name: str) -> dict:
 
 
 async def collect_mixed(n_battles: int, teacher: str) -> dict:
-    """Collect data against ALL opponents (equal games per opponent)."""
+    """Collect data against ALL opponents concurrently (equal games per opponent)."""
     per_opp = n_battles // len(_OPPONENT_CLS)
-    all_obs, all_actions, all_masks = [], [], []
 
-    for opp_name in _OPPONENT_CLS:
-        data = await collect(per_opp, teacher, opp_name)
-        all_obs.append(data["observations"])
-        all_actions.append(data["actions"])
-        all_masks.append(data["masks"])
+    results = await asyncio.gather(*[collect(per_opp, teacher, opp_name) for opp_name in _OPPONENT_CLS])
 
     return {
-        "observations": np.concatenate(all_obs),
-        "actions": np.concatenate(all_actions),
-        "masks": np.concatenate(all_masks),
+        "observations": np.concatenate([r["observations"] for r in results]),
+        "actions": np.concatenate([r["actions"] for r in results]),
+        "masks": np.concatenate([r["masks"] for r in results]),
     }
 
 
