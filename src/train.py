@@ -54,7 +54,7 @@ PPO_KWARGS = dict(
     n_epochs=10,
     gamma=0.99,  # Effective horizon ~100 turns (avg game ~50 turns)
     gae_lambda=0.95,
-    clip_range=0.1,  # Conservative clipping — limits KL drift from BC warm-start
+    clip_range=0.2,
     ent_coef=0.01,  # Entropy bonus — prevents policy collapse to a single action
     learning_rate=1e-4,  # Lower LR for BC fine-tuning — prevents eroding imitated policy
     verbose=1,
@@ -204,7 +204,12 @@ def main(new_run: bool = False) -> None:
                             **{k: v for k, v in PPO_KWARGS.items() if k != "verbose"},
                             tensorboard_log=run.logs_dir,
                         )
-                        print("  BC warm-start loaded — skipping logit bias")
+                        # Halve the BC-inherited anti-switch bias so PPO can learn switching
+                        with torch.no_grad():
+                            before = model.policy.action_net.bias.data[:6].mean().item()
+                            model.policy.action_net.bias.data[:6] *= 0.5
+                            after = model.policy.action_net.bias.data[:6].mean().item()
+                            print(f"  BC warm-start loaded — switch bias halved: {before:.2f} → {after:.2f}")
                     else:
                         print("  BC warm-start obs space mismatch — transferring weights")
                         model = load_with_expanded_obs(
