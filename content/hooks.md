@@ -212,3 +212,28 @@ The project had zero logging infrastructure. Every training output was a bare `p
 - Switch rate: 27.4% of actions
 - Best move used: move_1 (21.5% of move actions)
 - **Why it matters for the video:** The agent crossed 75% win rate vs RandomPlayer at step 194,604. It heavily prefers attacking over switching — aggressive style.
+
+---
+
+## Act 5: The Variance Problem (2026-04-03)
+
+### The 90% Ceiling
+**Hook:** "The agent hit 90% win rate in the first 2000 steps — then spent 100,000 more steps learning absolutely nothing."
+
+Evidence: run_030 training log shows win rate at step 2K = 0.88, at step 98K = 0.89. Completely flat. Meanwhile run_027 graduated at 98% in 5K steps — pure luck of the evaluation window. The 95% target was being hit or missed by RNG, not by learning.
+
+**Visual:** Overlay run_027 (instant graduation) vs run_030 (100K steps, stuck). Same code, same hyperparameters, wildly different outcomes. The randomness IS the story.
+
+### Expert Panel #2: "How do you teach an AI when the exam is rigged?"
+**Hook:** "We brought in RL professors, Meta/DeepMind engineers, and a top competitive Pokemon player to solve one question: how do you give an AI credit for skill when half the outcome is luck?"
+
+The key insight came from the competitive player: **type charts don't predict Gen 1 matchups.** What matters is which Pokemon you rolled (tier quality), speed tiers, and sleep move access. The professors said the solution is a "privileged critic" — an evaluator that sees both full teams (info the agent never gets) and tells the training loop "this game was supposed to be hard/easy."
+
+**Visual:** Split screen — agent's view (one Pokemon visible on each side) vs evaluator's view (both full teams with tier ratings). "The agent is playing blind. The evaluator sees the whole board."
+
+### The Forced Switch Bug
+**Hook:** "Our metrics said the agent was voluntarily switching 18% of the time and never being forced to switch. That's impossible — Pokemon forces switches when your active faints."
+
+Root cause: the callback was reading the action mask AFTER the step executed, not before. After a forced switch completes, the new state has moves available → classified as voluntary. Every forced switch was being miscounted.
+
+**Visual:** Code diff — one line change (`self._get_action_masks()` → `self.locals["action_masks"]`).

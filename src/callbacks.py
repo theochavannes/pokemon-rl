@@ -124,23 +124,6 @@ class WinRateCallback(BaseCallback):
         self._last_heartbeat_step: int = 0
         self._heartbeat_freq: int = 2048  # print a heartbeat every rollout
 
-    def _get_action_masks(self):
-        """Get current action masks from vectorized env (one per sub-env)."""
-        if hasattr(self.training_env, "envs"):
-            masks = []
-            for env in self.training_env.envs:
-                if hasattr(env, "action_masks"):
-                    masks.append(env.action_masks())
-                else:
-                    inner = env
-                    while hasattr(inner, "env"):
-                        inner = inner.env
-                        if hasattr(inner, "action_masks"):
-                            masks.append(inner.action_masks())
-                            break
-            return masks if masks else None
-        return None
-
     def _on_training_start(self) -> None:
         self.content_log.parent.mkdir(parents=True, exist_ok=True)
         self._write_content_log_header()
@@ -154,7 +137,9 @@ class WinRateCallback(BaseCallback):
         # Track action distribution + forced vs voluntary switches
         actions = self.locals.get("actions")
         if actions is not None:
-            action_masks = self._get_action_masks()
+            # Use pre-step masks from MaskablePPO's rollout (the masks that were
+            # active when the action was chosen), NOT the post-step env masks.
+            action_masks = self.locals.get("action_masks")
             for idx, a in enumerate(np.array(actions).flatten()):
                 if 0 <= a < 10:
                     self._action_counts[a] += 1
