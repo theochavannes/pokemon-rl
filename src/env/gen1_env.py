@@ -3,16 +3,16 @@ Gen 1 (RBY) Gymnasium environment.
 
 Wraps poke-env's SinglesEnv for use with MaskablePPO.
 
-Observation space : Box(-1, 1, shape=(1222,), float32)
+Observation space : Box(-1, 1, shape=(1559,), float32)
 Action space      : Discrete — provided by SinglesEnv, masked via action_masks()
 Reward            : Shaped (fainted/HP/status deltas) + terminal victory bonus
 
 Env stack for training:
     Gen1Env (SinglesEnv subclass)
         ↓
-    SingleAgentWrapper   obs = {"observation": np.array(1222,), "action_mask": np.array(N,)}
+    SingleAgentWrapper   obs = {"observation": np.array(1559,), "action_mask": np.array(N,)}
         ↓
-    SB3Wrapper           obs = np.array(1222,)  +  action_masks() -> bool array
+    SB3Wrapper           obs = np.array(1559,)  +  action_masks() -> bool array
         ↓
     DummyVecEnv / SubprocVecEnv
 """
@@ -68,11 +68,14 @@ _MOVE_STATUS_MAP = {
     Status.FRZ: 1.0,
 }
 
-_MOVE_FEATURES_PER_MOVE = 19
+_MOVE_FEATURES_PER_MOVE = 25
 _MOVE_PADDING = [0.0] * _MOVE_FEATURES_PER_MOVE
 
 # Gen 1 trapping moves — prevent opponent from acting for 2-5 turns
 _TRAPPING_MOVES = {"wrap", "bind", "clamp", "firespin"}
+
+# Moves that require sleeping target (Dream Eater)
+_REQUIRES_SLEEP = {"dreameater"}
 
 # Secondary effect type encoding: what the secondary effect DOES
 # Maps secondary status/volatile to a float. Positive = status, negative = stat drops.
@@ -140,26 +143,13 @@ def _status_immune(move, target) -> float:
 
 def _move_features(move, opponent) -> list:
     """
-    19 features per move:
-      base_power            — normalized by 150
-      type_index            — PokemonType enum value / 18
-      pp_fraction           — current_pp / max_pp
-      effectiveness         — type multiplier vs opponent / 4 (max 4x in Gen 1)
-      accuracy              — move accuracy 0.0–1.0 (1.0 = always hits)
-      is_physical           — 1.0 if Physical, else 0.0 (Step 6: one-hot category)
-      is_special            — 1.0 if Special, else 0.0
-      status_effect         — status inflicted (0.0=none … 1.0=FRZ)
-      priority              — move priority / 5.0, clamped to [-1, 1]
-      self_boost            — sum of self-boost values / 6.0
-      heal                  — self-heal fraction (Recover = 0.5) (Step 7: separated)
-      drain                 — drain fraction (Mega Drain = 0.5) (Step 7: separated)
-      secondary_chance      — secondary effect probability (Body Slam = 0.3)
-      secondary_effect_type — what secondary does (Step 1: PAR=0.8, FRZ=1.0, drops<0)
-      recoil                — recoil fraction (Submission = 0.25)
-      self_destruct         — 1.0 for Explosion/Self-Destruct
-      fixed_damage          — fixed damage / 100 (Seismic Toss = 1.0)
-      trapping              — 1.0 for Wrap/Bind/Clamp/Fire Spin (Step 8)
-      status_immune         — 1.0 if target's type blocks this move's status (Step 9)
+    25 features per move (19 from Sprint 5 + 6 from Sprint 7):
+      [Sprint 5] base_power, type_index, pp_fraction, effectiveness, accuracy,
+      is_physical, is_special, status_effect, priority, self_boost,
+      heal, drain, secondary_chance, secondary_effect_type,
+      recoil, self_destruct, fixed_damage, trapping, status_immune
+      [Sprint 7] must_recharge, requires_sleep, pp_max_norm,
+      is_contact, is_sound, ignore_accuracy
     """
     base_power = move.base_power / 150.0
     type_index = move.type.value / 18.0
@@ -243,6 +233,25 @@ def _move_features(move, opponent) -> list:
     # Step 9: Status immunity flag
     immune = _status_immune(move, opponent)
 
+    # Sprint 7 Step 3: Hyper Beam recharge flag
+    must_recharge = 0.0
+    with contextlib.suppress(Exception):
+        self_entry = move.entry.get("self") or {}
+        if self_entry.get("volatileStatus") == "mustrecharge" or "recharge" in (getattr(move, "flags", None) or {}):
+            must_recharge = 1.0
+
+    # Sprint 7 Step 4: Dream Eater conditional flag
+    requires_sleep = 1.0 if getattr(move, "id", "") in _REQUIRES_SLEEP else 0.0
+
+    # Sprint 7 Step 5: PP max normalized (move scarcity indicator)
+    pp_max_norm = (move.max_pp / 35.0) if move.max_pp and move.max_pp > 0 else 0.0
+
+    # Sprint 7 Step 6: Move-specific flags
+    flags = getattr(move, "flags", None) or {}
+    is_contact = 1.0 if "contact" in flags else 0.0
+    is_sound = 1.0 if "sound" in flags else 0.0
+    ignore_accuracy = 1.0 if accuracy >= 1.0 and getattr(move, "accuracy", True) is True else 0.0
+
     return [
         base_power,
         type_index,
@@ -263,6 +272,12 @@ def _move_features(move, opponent) -> list:
         fixed_damage,
         trapping,
         immune,
+        must_recharge,
+        requires_sleep,
+        pp_max_norm,
+        is_contact,
+        is_sound,
+        ignore_accuracy,
     ]
 
 
@@ -299,29 +314,27 @@ def _base_stats(pokemon) -> list:
     ]
 
 
-_OBS_DIM = 1222
+_OBS_DIM = 1559
 
 
 def embed_battle(battle) -> np.ndarray:
     """
-    Produces a 1222-dim float32 observation from a poke-env Battle object.
-
-    All Pokemon are forced to level 100 in our Showdown config, so level is
-    omitted (always 1.0). Speed in base_stats is paralysis-adjusted.
+    Produces a 1559-dim float32 observation from a poke-env Battle object.
 
     Observation layout:
-      Own active         16   HP, 6 boosts, status, active, fainted, types, base stats
-      Own moves          80   4 × 19 move features + 4 target_statused (Step 2)
-      Own bench         510   6 × 85 (9 mon features + 4 × 19 move features)
-      Opp active         15   HP, 6 boosts, status, fainted, types, base stats
-      Opp bench         510   6 × 85 (9 mon features + 4 × 19 move features)
-      Opp revealed mvs   76   4 × 19 move features
-      Trapping            2   own_trapped, opp_maybe_trapped
-      Speed advantage     1   (own_spe - opp_spe) / max
-      Alive counts        2   own_alive/6, opp_alive/6
-      Volatile status     8   sub, reflect, light_screen, confused, leech_seed (Step 3)
-      Opp status threat   1   opponent has revealed status moves (Step 4)
-      Toxic counter       1   Toxic escalation counter (Step 5)
+      Own active        16    HP, 6 boosts, status, active, fainted, types, base stats
+      Own moves        104    4 × 25 move features + 4 target_statused
+      Own bench        654    6 × 109 (9 mon features + 4 × 25 move features)
+      Opp active        15    HP, 6 boosts, status, fainted, types, base stats
+      Opp bench        654    6 × 109 (9 mon features + 4 × 25 move features)
+      Opp revealed     100    4 × 25 move features
+      Trapping           2    own_trapped, opp_maybe_trapped
+      Speed advantage    1
+      Alive counts       2
+      Volatile status    8    sub, reflect, light_screen, confused, leech_seed
+      Opp status threat  1
+      Toxic counter      1
+      Turn phase         1    normalized turn number (S7.2)
     """
     obs = []
     own = battle.active_pokemon
@@ -341,7 +354,7 @@ def embed_battle(battle) -> np.ndarray:
     obs.extend(_types(own))
     obs.extend(_base_stats(own))
 
-    # --- Own moves (4 × 19 + 4 = 80 dims) ---
+    # --- Own moves (4 × 25 + 4 = 104 dims) ---
     moves = list(own.moves.values())[:4]
     for move in moves:
         obs.extend(_move_features(move, opp))
@@ -351,7 +364,7 @@ def embed_battle(battle) -> np.ndarray:
         obs.extend(_MOVE_PADDING)
         obs.append(0.0)  # target_statused padding
 
-    _OWN_BENCH_SLOT = 9 + 4 * _MOVE_FEATURES_PER_MOVE  # 85 dims per slot
+    _OWN_BENCH_SLOT = 9 + 4 * _MOVE_FEATURES_PER_MOVE  # 109 dims per slot
 
     # --- Own bench (6 × 85 = 510 dims) ---
     own_team = list(battle.team.values())
@@ -384,7 +397,7 @@ def embed_battle(battle) -> np.ndarray:
     obs.extend(_types(opp))
     obs.extend(_base_stats(opp))
 
-    _OPP_BENCH_SLOT = 9 + 4 * _MOVE_FEATURES_PER_MOVE  # 85 dims per slot
+    _OPP_BENCH_SLOT = 9 + 4 * _MOVE_FEATURES_PER_MOVE  # 109 dims per slot
 
     # --- Opponent bench (6 × 85 = 510 dims) ---
     opp_team = list(battle.opponent_team.values())
@@ -465,6 +478,10 @@ def embed_battle(battle) -> np.ndarray:
             toxic_counter = min(own.status_counter / 15.0, 1.0)
     obs.append(toxic_counter)
 
+    # --- Sprint 7 Step 2: Turn phase (1 dim) ---
+    turn_phase = min(battle.turn / 50.0, 1.0) if hasattr(battle, "turn") else 0.0
+    obs.append(turn_phase)
+
     result = np.array(obs, dtype=np.float32)
     assert result.shape == (_OBS_DIM,), f"Obs shape mismatch: expected ({_OBS_DIM},), got {result.shape}"
     assert np.all(np.isfinite(result)), "Obs contains NaN/Inf"
@@ -475,7 +492,7 @@ class Gen1Env(SinglesEnv):
     """
     Gen 1 random battle environment for MaskablePPO.
 
-    Observation: 1222-dim float32 vector (see embed_battle docstring for layout).
+    Observation: 1559-dim float32 vector (see embed_battle docstring for layout).
     """
 
     def __init__(self, shaping_factor: float = 1.0, **kwargs):

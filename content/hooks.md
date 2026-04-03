@@ -362,3 +362,19 @@ After: a two-tower architecture. One tower processes your own team info (606 dim
 **Why it's better:** The network no longer has to learn that "my HP" and "their HP" are fundamentally different kinds of information. Each tower specializes — the own-tower learns "what can I do?" and the opp-tower learns "what are they doing?" The merge layer learns "given what I can do and what they're doing, what should I pick?"
 
 **Visual:** Network diagram — before (single funnel 1222→256→128) vs after (two funnels merging). Show the total parameter count: ~300K → ~500K. "Same game, split brain."
+
+### The League of Past Selves (Sprint 7)
+**Hook:** "Every 50,000 training steps, the AI saves a snapshot of itself. Then it plays against a random past version — including the version that couldn't even beat a random player."
+
+This is fictitious self-play, the same technique used in AlphaStar and OpenAI Five. Instead of always fighting the latest version of itself (which can lead to circular strategies), the agent faces random historical versions. This forces robust play that works against many strategies, not just the current one.
+
+**Visual:** Timeline showing snapshots accumulating: "Step 50K: first snapshot. Step 100K: pool of 2. Step 500K: pool of 10 past selves." Show the random selection — "this game, you're playing against yourself from 200K steps ago."
+
+### The Polish Pass (Sprint 7)
+**Hook:** "We added 6 more features per move that the pros said matter. Hyper Beam skips your next turn. Dream Eater only works on sleeping targets. Blizzard has 5 PP — use it wisely."
+
+The obs space went from 1222 to 1559 dimensions. But each new feature encodes something a human player considers automatically:
+- Can I afford to use Hyper Beam? (must_recharge)
+- Is Dream Eater even useful right now? (requires_sleep)
+- How many times can I use this move? (pp_max)
+- What turn is it? (turn_phase — early game vs endgame changes everything)

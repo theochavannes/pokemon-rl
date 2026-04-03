@@ -49,6 +49,7 @@ def _mock_move(
     move.recoil = 0
     move.self_destruct = None
     move.damage = 0
+    move.flags = {}
     return move
 
 
@@ -119,6 +120,7 @@ def _mock_battle(own_hp=1.0, opp_hp=0.8, team_size=6, opp_team_size=3, trapped=F
     battle.maybe_trapped = maybe_trapped
     battle.side_conditions = {}
     battle.opponent_side_conditions = {}
+    battle.turn = 1
     return battle
 
 
@@ -133,7 +135,7 @@ class TestEmbedBattle:
 
         battle = _mock_battle()
         obs = embed_battle(battle)
-        assert obs.shape == (1222,), f"Expected (1222,), got {obs.shape}"
+        assert obs.shape == (1559,), f"Expected (1559,), got {obs.shape}"
 
     def test_output_dtype(self):
         from src.env.gen1_env import embed_battle
@@ -161,20 +163,20 @@ class TestEmbedBattle:
 
         battle = _mock_battle(trapped=True, maybe_trapped=True)
         obs = embed_battle(battle)
-        # Trapping flags at -15 and -14 (before speed_adv, alive, volatile, status_threat, toxic)
-        assert obs[-15] == 1.0, "trapped flag should be 1.0"
-        assert obs[-14] == 1.0, "maybe_trapped flag should be 1.0"
+        # Trapping flags at -16 and -15 (before speed, alive, volatile, status, toxic, turn)
+        assert obs[-16] == 1.0, "trapped flag should be 1.0"
+        assert obs[-15] == 1.0, "maybe_trapped flag should be 1.0"
 
     def test_empty_opp_bench_padding(self):
         from src.env.gen1_env import embed_battle
 
         battle = _mock_battle(opp_team_size=0)
         obs = embed_battle(battle)
-        # Opp bench starts at: 16 (own active) + 80 (own moves) + 510 (own bench) + 15 (opp active) = 621
-        opp_bench_start = 16 + 80 + 510 + 15
-        # Each empty slot starts with -1.0, slot size = 85
+        # Opp bench starts at: 16 (own active) + 104 (own moves) + 654 (own bench) + 15 (opp active) = 789
+        opp_bench_start = 16 + 104 + 654 + 15
+        # Each empty slot starts with -1.0, slot size = 109
         for i in range(6):
-            slot_start = opp_bench_start + i * 85
+            slot_start = opp_bench_start + i * 109
             assert obs[slot_start] == -1.0, f"Empty opp bench slot {i} should start with -1.0"
 
     def test_no_moves_pokemon(self):
@@ -185,9 +187,9 @@ class TestEmbedBattle:
         # Set own active to have 0 moves
         battle.active_pokemon.moves = {}
         obs = embed_battle(battle)
-        # Move section starts at index 16 (after own active), 80 dims total (4 × (19 + 1))
+        # Move section starts at index 16 (after own active), 104 dims total (4 × (25 + 1))
         move_start = 16
-        for i in range(80):
+        for i in range(104):
             assert obs[move_start + i] == 0.0, "Empty move slot should be 0.0"
 
     def test_various_team_sizes(self):
@@ -198,7 +200,7 @@ class TestEmbedBattle:
             for opp_size in [0, 2, 6]:
                 battle = _mock_battle(team_size=team_size, opp_team_size=opp_size)
                 obs = embed_battle(battle)
-                assert obs.shape == (1222,)
+                assert obs.shape == (1559,)
                 assert np.all(np.isfinite(obs))
 
 
@@ -506,18 +508,18 @@ class TestIntegrationSmoke:
 
         # Normal battle
         obs = embed_battle(_mock_battle())
-        assert obs.shape == (1222,)
+        assert obs.shape == (1559,)
 
         # Minimal teams
         obs = embed_battle(_mock_battle(team_size=1, opp_team_size=1))
-        assert obs.shape == (1222,)
+        assert obs.shape == (1559,)
 
         # Fainted active (edge case)
         battle = _mock_battle()
         battle.active_pokemon.fainted = True
         battle.active_pokemon.current_hp_fraction = 0.0
         obs = embed_battle(battle)
-        assert obs.shape == (1222,)
+        assert obs.shape == (1559,)
         assert obs[0] == 0.0  # HP should be 0
 
     def test_move_features_accuracy_variants(self):
@@ -680,8 +682,8 @@ class TestSprint5Features:
         battle.opponent_active_pokemon.status = Status.PAR
 
         obs = embed_battle(battle)
-        # target_statused is at index 16 (own active) + 19 (first move features) = 35
-        target_statused_idx = 16 + 19  # after first move's 19 features
+        # target_statused is at index 16 (own active) + 25 (first move features) = 41
+        target_statused_idx = 16 + 25  # after first move's 25 features
         assert obs[target_statused_idx] == 1.0, "target_statused should be 1.0 for status move vs statused opp"
 
     def test_target_statused_zero_when_no_status(self):
@@ -691,7 +693,7 @@ class TestSprint5Features:
         battle = _mock_battle()
         obs = embed_battle(battle)
         # First move's target_statused (normal move, opp not statused)
-        target_statused_idx = 16 + 19
+        target_statused_idx = 16 + 25
         assert obs[target_statused_idx] == 0.0, "target_statused should be 0.0 for normal move"
 
     def test_status_immune_poison_type(self):
@@ -808,10 +810,11 @@ class TestSprint5Features:
         # Volatile status starts at -12 from end (8 volatile + 1 opp_status + 1 toxic = 10 from end, but before that is alive(2))
         # Actually: end = trapping(2) + speed(1) + alive(2) + volatile(8) + status_threat(1) + toxic(1) = 15
         # volatile starts at -10 from end
-        assert obs[-10] == 1.0, "own_substitute should be 1.0"
-        assert obs[-9] == 0.0, "opp_substitute should be 0.0"
-        assert obs[-8] == 1.0, "own_reflect should be 1.0"
-        assert obs[-7] == 0.0, "own_light_screen should be 0.0"
+        # volatile starts at -11 from end (8 volatile + 1 status_threat + 1 toxic + 1 turn = 11)
+        assert obs[-11] == 1.0, "own_substitute should be 1.0"
+        assert obs[-10] == 0.0, "opp_substitute should be 0.0"
+        assert obs[-9] == 1.0, "own_reflect should be 1.0"
+        assert obs[-8] == 0.0, "own_light_screen should be 0.0"
 
 
 # ---------------------------------------------------------------------------
@@ -827,10 +830,10 @@ class TestFeatureExtractor:
 
         from src.env.feature_extractor import PokemonFeatureExtractor
 
-        obs_space = Box(low=-1.0, high=1.0, shape=(1222,), dtype=np.float32)
+        obs_space = Box(low=-1.0, high=1.0, shape=(1559,), dtype=np.float32)
         extractor = PokemonFeatureExtractor(obs_space, features_dim=256)
 
-        batch = torch.randn(4, 1222)
+        batch = torch.randn(4, 1559)
         out = extractor(batch)
         assert out.shape == (4, 256), f"Expected (4, 256), got {out.shape}"
 
@@ -840,7 +843,7 @@ class TestFeatureExtractor:
 
         from src.env.feature_extractor import PokemonFeatureExtractor
 
-        obs_space = Box(low=-1.0, high=1.0, shape=(1222,), dtype=np.float32)
+        obs_space = Box(low=-1.0, high=1.0, shape=(1559,), dtype=np.float32)
         extractor = PokemonFeatureExtractor(obs_space, features_dim=256)
 
         total = sum(p.numel() for p in extractor.parameters())

@@ -433,3 +433,32 @@ Incompatible with VecNormalize (embeddings need integer indices, VecNormalize wo
 
 ### BC Script Updated
 Behavioral cloning now uses the same two-tower architecture so the warm-start model matches the training architecture exactly.
+
+---
+
+## 2026-04-03 — Sprint 7: Training Refinement (1222 → 1559 dims)
+
+### New Per-Move Features (25 per move, was 19)
+- **must_recharge**: Hyper Beam requires skipping next turn (unless it KOs)
+- **requires_sleep**: Dream Eater only works on sleeping targets
+- **pp_max_norm**: max_pp/35 — indicates move scarcity (Blizzard has 5 PP vs Tackle's 35)
+- **is_contact**: Physical contact flag
+- **is_sound**: Sound-based move flag
+- **ignore_accuracy**: Swift/moves that bypass accuracy checks
+
+### Turn Phase Feature (+1 global dim)
+`min(battle.turn / 50, 1.0)` — helps distinguish early game (set up, preserve mons) from endgame (trade aggressively).
+
+### Self-Play Population (Sprint 7 Step 8)
+Instead of always playing against the latest frozen model, the self-play opponent is randomly sampled from the league snapshot pool. Every 50K steps, a new snapshot is added. This prevents overfitting to a single opponent's weaknesses — the core idea from AlphaStar's fictitious self-play.
+
+### Obs Dimension: 1559
+| Section | S5 (928→1222) | S7 (1222→1559) | Delta |
+|---------|---------------|----------------|-------|
+| Per-move features | 19 | 25 | +6 |
+| Own moves | 80 | 104 | +24 |
+| Own bench | 510 | 654 | +144 |
+| Opp bench | 510 | 654 | +144 |
+| Opp revealed | 76 | 100 | +24 |
+| Global | 15 | 16 | +1 |
+| **Total** | **1222** | **1559** | **+337** |
