@@ -79,7 +79,7 @@ class ValueDataCollector(SmartHeuristicPlayer):
             latent_pi = self.model.policy.mlp_extractor.forward_actor(features)
             logits = self.model.policy.action_net(latent_pi)
             logits[mask_tensor == 0] = -float("inf")
-            action = logits.argmax(dim=1).item()
+            action = logits.argmax(dim=1).cpu().numpy()[0]
 
         return SinglesEnv.action_to_order(action, battle)
 
