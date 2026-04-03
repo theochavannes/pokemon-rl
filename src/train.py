@@ -99,9 +99,14 @@ def _prevent_sleep() -> None:
 def main(new_run: bool = False) -> None:
     _prevent_sleep()
 
+    # Build JSON-safe config snapshot (exclude non-serializable callables/classes)
+    config_snapshot = {k: v for k, v in PPO_KWARGS.items() if k not in ("policy_kwargs", "learning_rate")}
+    config_snapshot["policy_kwargs"] = "PokemonFeatureExtractor(256) + pi=[128] vf=[128]"
+    config_snapshot["learning_rate"] = "linear_schedule(3e-4 -> 1e-4)"
+
     run = RunManager(
         run_type="curriculum",
-        config={**PPO_KWARGS, "curriculum": CURRICULUM, "n_envs": N_ENVS},
+        config={**config_snapshot, "curriculum": CURRICULUM, "n_envs": N_ENVS},
         new_run=new_run,
     )
 
