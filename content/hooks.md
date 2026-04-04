@@ -525,3 +525,53 @@ After the GM demanded accountability, the team realized a pattern: every plan hy
 **Visual:** Timeline of failed diagnoses — "shared features extractor" (wrong), "critic warmstart insufficient" (symptom not cause), "two-tower will fix it" (made it worse). Each one with a big red X. Then the new rule: "PROVE IT FIRST."
 
 **Why it's great content:** Meta-learning moment. The team isn't just training an AI — they're learning how to debug AI. The audience sees that ML research is 90% diagnosis and 10% implementation.
+
+---
+
+## Act 4: The Value Function Plateau (2026-04-04)
+
+### n_epochs Was the Smoking Gun All Along
+**Hook:** "We spent days trying to fix the value function. Tried weight copying, actor freezing, lambda tuning. Turns out the fix was changing ONE number: n_epochs from 10 to 3."
+
+Run 052 was the breakthrough — first run with the [256,128] architecture to maintain positive ExplVar AND stable BC knowledge. The previous 48 runs all had n_epochs=10, which caused the value function to memorize each 8192-sample rollout, destroying generalization within 23K steps.
+
+**Visual:** Side-by-side ExplVar plots: Run 047 (n_epochs=10) collapses from 0.99 to -0.26 in 23K steps. Run 052 (n_epochs=3) stays positive for 287K+ steps.
+
+### But Winning Didn't Follow
+**Hook:** "The value function works. The agent doesn't improve. We fixed the engine but the car won't go faster."
+
+After 230K steps of training with a working value function (ExplVar=0.12), win rate flatlined at 54%. The team expected the fix to unlock learning. It didn't.
+
+**Visual:** WR chart — perfectly flat line at 54% stretching across 230K steps. The audience expects it to go up. It doesn't.
+
+### The Benchmark That Changed Everything
+**Hook:** "To find out what the agent was stuck on, we tested it against every opponent. The surprise: it was already beating ALL of them."
+
+| Agent | Overall WR |
+|-------|-----------|
+| MaxDamagePlayer | 51.5% |
+| TypeMatchupPlayer (switches!) | 51.0% |
+| **Our RL agent** | **58.2%** |
+
+The agent had silently become the strongest player in the room. It wasn't stuck because it couldn't learn — it was stuck because the remaining improvements needed better advantage estimates than ExplVar=0.12 could provide.
+
+**The twist:** TypeMatchupPlayer, which switches aggressively, was WORSE than our non-switching agent. Switching without judgment is counterproductive.
+
+**Visual:** Bar chart of the three agents. Our agent clearly on top. The "switching is the answer" hypothesis crossed out in red.
+
+### Temperature Trap
+**Hook:** "The opponent difficulty was supposed to increase as the agent got better. Instead, it got stuck in a feedback loop."
+
+Temperature formula: `target = 2.0*(1-WR) + 0.1*WR`. At 54% WR → temp=0.99. The opponents were exactly as hard as the agent could handle. Not harder, not easier. A perfect equilibrium that prevented any further learning.
+
+**Visual:** Temperature chart alongside WR chart — both flatlined in perfect sync. The system found its Nash equilibrium.
+
+### The Fix: More Signal, Less Noise
+Three config changes, zero code changes:
+- `n_steps`: 2048 → 4096 (2x more data per value function update)
+- `n_epochs`: 3 → 4 (safe with the bigger buffer)
+- `vf_coef`: 0.5 → 1.0 (double the value learning gradient)
+
+Target: ExplVar > 0.20 → unlock the next phase of learning.
+
+**Why it's great content:** The audience sees a counterintuitive result — the agent WAS learning, it WAS the best player, but it couldn't IMPROVE because its self-evaluation (value function) was too noisy to know what was working. Like a student who can pass every test but can't study effectively because they can't tell which answers they got right.

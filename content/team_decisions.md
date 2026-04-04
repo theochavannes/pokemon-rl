@@ -728,3 +728,63 @@ ExplVar AND stable BC knowledge simultaneously.
 | Actor freeze alone (n_epochs=10) | Freeze not sufficient without reducing epochs | Experiment C: ExplVar = -0.13 |
 | Weight copy as primary fix | Warmstart already works (ExplVar 0.99). Weight copy kept in BC script as defensive safety net, not the primary fix | Warmstart investigation |
 | Higher LR (3e-4) | Destroys warmstart faster | Experiment B2 vs B |
+
+---
+
+## 2026-04-04 — Run 052 Plateau Analysis + Value Function Tuning
+
+### The Plateau
+
+Run 052 was a breakthrough for stability (first run with positive ExplVar +
+stable BestMv%), but WR flatlined at 54% for 230K steps. The n_epochs fix
+solved the value function collapse but didn't unlock learning.
+
+### Benchmark Experiments (scripts/benchmark_league.py)
+
+| Agent | vs MaxDmg | vs TypeMatch | vs SoftmaxDmg(t=1.0) | Overall |
+|-------|-----------|--------------|----------------------|---------|
+| MaxDamagePlayer | 41.0% | 47.9% | 65.7% | 51.5% |
+| TypeMatchupPlayer | 51.0% | 46.4% | 55.6% | 51.0% |
+| **Run 052 model** | **55.6%** | **54.5%** | **64.6%** | **58.2%** |
+
+### Key Findings
+
+1. **Model is already the strongest agent.** Beats both heuristic baselines by
+   6.7-7.2pp. PPO DID learn during training — basic move selection improved.
+
+2. **Switching alone doesn't help.** TypeMatchupPlayer (which switches
+   aggressively) gets only 51.0% — WORSE than our non-switching model. This
+   refutes the hypothesis that the agent needs switching to improve.
+
+3. **Temperature equilibrium.** SoftmaxDmg temp stuck at 0.95-1.05 because
+   the formula `2.0*(1-wr) + 0.1*wr` equilibrates at temp≈1.0 when WR≈54%.
+
+4. **ExplVar is the bottleneck.** At 0.12, advantage estimates are 88% noise.
+   The model can't distinguish "this move was actually good" from "random
+   variance." The easy gains (basic move selection) were captured quickly.
+   The remaining gains need precise advantages.
+
+### Decision: Hyperparameter Tuning for Value Function Quality
+
+| Change | From | To | Rationale |
+|--------|------|----|-----------|
+| n_steps | 2048 | 4096 | 2x rollout buffer → less per-rollout overfitting |
+| n_epochs | 3 | 4 | Safe with 2x buffer (16384 vs 8192 samples) |
+| vf_coef | 0.5 | 1.0 | Double value loss gradient weight |
+
+Target: ExplVar > 0.20 by 100K steps, WR improvement trend by 200K steps.
+
+### What Was Rejected
+
+| Rejected | Reason |
+|----------|--------|
+| Switching teacher / new BC | TypeMatch benchmark shows switching doesn't help yet |
+| n_epochs=5+ | Risky without evidence; 4 is conservative step |
+| Periodic re-freezing | Adds complexity; try simpler config change first |
+| Lower clip_range (0.05) | May over-constrain policy learning |
+
+### Action Bias Check (run_052 model)
+
+Switch mean bias: -0.039, Move mean bias: +0.058. Nearly neutral — the model
+has freedom to switch but doesn't because the value function doesn't credit it.
+This confirms the bottleneck is advantage quality, not action bias.
