@@ -50,7 +50,7 @@ PPO_KWARGS = dict(
     n_steps=2048,
     batch_size=128,
     n_epochs=3,  # Matches curriculum — n_epochs=10 overfits value fn per rollout
-    gamma=0.95,  # Matches curriculum — shorter horizon for learnable value function
+    gamma=0.99,  # Standard discount factor — gamma=0.95 tested and failed (run 055)
     gae_lambda=0.95,
     clip_range=0.1,  # Conservative to preserve learned policy
     ent_coef=0.01,

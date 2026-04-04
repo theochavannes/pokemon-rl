@@ -848,3 +848,29 @@ returns (lambda=1.0) rejected — ExplVar never goes positive, BC erodes.
 ### Also Fixed
 selfplay_train.py hyperparams synced with train.py (was still gamma=0.99,
 n_epochs=10, clip_range=0.2, LR=3e-4 — all known-bad settings).
+
+---
+
+## 2026-04-04 — Run 055 Failed: gamma=0.95 Reverted
+
+### The Failure
+Run 055 (gamma=0.95 + critic warmup) killed at 102K steps. ExplVar +0.017 at
+99K vs run 052's +0.170 at the same point. WR 50% vs 56%. The shorter horizon
+made the value function WORSE, not better.
+
+### Why the Mini-Experiment Was Wrong
+The 50K mini-experiment (no warmup, gamma=0.95) hit ExplVar +0.133. But that
+was a different training regime — actor updating simultaneously generates
+diverse states. With critic warmup (frozen actor), gamma=0.95 produced smaller
+GAE targets → weaker gradients → slower learning. The mini-experiment didn't
+predict the full-run behavior.
+
+### Anti-Pattern Confirmed
+Mini-experiments that don't match the actual training regime can give false
+positives. The Phase 2.5 gate in next.md caught the positive signal, but the
+experiment conditions (no warmup) diverged from real training (with warmup).
+Future experiments must match the actual training pipeline.
+
+### Decision
+Gamma reverted to 0.99. selfplay_train.py also reverted. The ExplVar ≈ 0.12
+at gamma=0.99 remains the best achievable with current setup.
