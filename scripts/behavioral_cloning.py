@@ -32,7 +32,7 @@ sys.path.insert(0, str(_ROOT))
 from src.env.gen1_env import make_env
 
 # Must match train.py PPO_KWARGS
-OBS_DIM = 421
+OBS_DIM = 1559
 ACTION_DIM = 10
 
 
@@ -189,6 +189,18 @@ def train_bc(
             )
 
     print(f"\nBest validation accuracy: {best_val_acc:.1%}")
+
+    # Copy BC-trained actor features to initialize the value function.
+    # policy_net and value_net have identical architecture [256, 128],
+    # so weights can be copied directly. This gives the value function
+    # useful feature representations instead of random initialization.
+    with torch.no_grad():
+        pi_params = list(model.policy.mlp_extractor.policy_net.parameters())
+        vf_params = list(model.policy.mlp_extractor.value_net.parameters())
+        for pi_p, vf_p in zip(pi_params, vf_params, strict=False):
+            vf_p.data.copy_(pi_p.data)
+        copied = sum(p.numel() for p in vf_params)
+        print(f"Copied policy_net weights to value_net ({copied:,} params)")
 
     # Save the full MaskablePPO model (policy + value function)
     os.makedirs(Path(output_path).parent, exist_ok=True)
