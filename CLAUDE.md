@@ -111,6 +111,21 @@ Env stack: `Gen1Env → SingleAgentWrapper → SB3Wrapper → Monitor → DummyV
 
 When facing complex architectural decisions (reward shaping, observation space changes, training curriculum design), break the problem into steps, consider at least 2 alternatives, and compare trade-offs before recommending an approach.
 
+## Git Workflow — Ship Every Task
+
+When work is complete (code changes pass tests), ALWAYS follow this sequence without being asked:
+
+1. **Branch**: `git checkout -b <descriptive-branch-name>`
+2. **Commit**: Stage relevant files with focused commits. Use `git commit -m "$(cat <<'EOF' ... EOF)"` for multi-line messages. Never use `--no-verify`.
+3. **Push**: `git push -u origin <branch>`
+4. **PR**: `gh pr create --title "..." --body "$(cat <<'EOF' ... EOF)"` — include a Summary section and Test plan. No AI attribution.
+5. **Wait for CodeRabbit**: `gh pr checks <N>` until CodeRabbit shows pass. Read inline comments with `gh api repos/theochavannes/pokemon-rl/pulls/<N>/comments`.
+6. **Address feedback**: Fix valid issues, commit, push. Ignore pure nitpicks on docs/notes files.
+7. **Merge**: `gh pr merge <N> --merge --delete-branch`
+8. **Sync**: `git checkout master && git pull`
+
+This is not optional. Every task that changes tracked files ends with a merged PR on master.
+
 ## Gen 1 Mechanics to Be Aware Of
 
 - 1/256 miss chance on nominally 100%-accurate moves
