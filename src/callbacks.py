@@ -122,7 +122,7 @@ class WinRateCallback(BaseCallback):
         self._last_eval_episode: int = 0
         self._target_hit_once: bool = False
         self._last_heartbeat_step: int = 0
-        self._heartbeat_freq: int = 2048  # print a heartbeat every rollout
+        self._heartbeat_freq: int = 4096  # print a heartbeat every rollout (matches n_steps)
 
         # Move quality tracking
         self._best_move_picks: int = 0  # times agent picked highest-damage move
