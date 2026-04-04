@@ -726,5 +726,5 @@ ExplVar AND stable BC knowledge simultaneously.
 |----------|--------|----------|
 | gae_lambda=1.0 | Pure MC returns catastrophic for value learning | Experiment C3: ExplVar = -0.80 |
 | Actor freeze alone (n_epochs=10) | Freeze not sufficient without reducing epochs | Experiment C: ExplVar = -0.13 |
-| Weight copy (policy→value) | Warmstart already works (ExplVar 0.99). Problem was preservation, not initialization | Warmstart investigation |
+| Weight copy as primary fix | Warmstart already works (ExplVar 0.99). Weight copy kept in BC script as defensive safety net, not the primary fix | Warmstart investigation |
 | Higher LR (3e-4) | Destroys warmstart faster | Experiment B2 vs B |
