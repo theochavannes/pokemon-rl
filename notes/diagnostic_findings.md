@@ -531,3 +531,38 @@ return." It CANNOT predict "will we win in 30 turns against hidden Tauros."
 Trade-off: agent becomes more myopic. Won't sacrifice now for benefit 20+
 turns later. But currently it can't learn ANYTHING. Better to learn short-term
 tactics well than to attempt long-horizon planning with zero learning signal.
+
+---
+
+## 2026-04-04 — Run 055 FAILED: gamma=0.95 Is Worse, Not Better
+
+### Evidence
+
+Run 055 (gamma=0.95 + critic warmup) killed at 102K steps. ExplVar in League
+phase DECLINED from +0.117 (75K) to +0.017 (99K). Comparison at ~100K total:
+
+| Metric | Run 052 (γ=0.99) | Run 055 (γ=0.95) |
+|--------|-------------------|-------------------|
+| ExplVar | +0.170 | +0.017 |
+| BestMv% | 57.6% | 58.6% |
+| WR | 56% | 50% |
+
+### Why the Mini-Experiment Was Misleading
+
+The 50K mini-experiment (no warmup) showed ExplVar +0.133 at gamma=0.95. But
+with critic warmup (frozen actor), gamma=0.95 performed WORSE. The shorter
+horizon produced smaller GAE targets during freeze, and the value function
+couldn't maintain its quality post-unfreeze. The mini-experiment's positive
+result came from the actor updating simultaneously — a different training regime.
+
+### Lesson
+
+The offline ceiling experiment (CV R² < 0) proved returns are unpredictable
+at gamma=0.99, but lowering gamma is not the fix. The online value function
+trains on bootstrapped GAE targets (not raw MC returns), and shorter gamma
+reduces the signal in those targets. Gamma=0.99 with ExplVar~0.12 is better
+than gamma=0.95 with ExplVar~0.02.
+
+### Reverted
+
+gamma back to 0.99 in both train.py and selfplay_train.py.

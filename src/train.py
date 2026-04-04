@@ -54,10 +54,9 @@ PPO_KWARGS = dict(
     n_steps=2048,
     batch_size=128,
     n_epochs=3,  # Was 10 — n_epochs=10 overfits value fn per rollout, destroying warmstart
-    gamma=0.95,  # Was 0.99 — shorter horizon makes returns predictable from observations.
-    # Offline ceiling experiment: CV R² < 0 at gamma=0.99 (returns unpredictable).
-    # At gamma=0.95, ExplVar reached +0.13 in 50K steps with no warmup (run_054 needed
-    # 50K frozen-actor warmup to reach the same). Effective horizon ~20 steps.
+    gamma=0.99,  # Reverted from 0.95 — run 055 showed gamma=0.95 ExplVar WORSE than 0.99
+    # (0.017 vs 0.170 at 100K steps). Shorter horizon helped in mini-experiment (no warmup)
+    # but hurt with critic warmup. The value function needs long-horizon signal.
     gae_lambda=0.95,
     clip_range=0.1,  # Was 0.2 — conservative to preserve BC knowledge (run 043 lesson)
     max_grad_norm=0.5,
