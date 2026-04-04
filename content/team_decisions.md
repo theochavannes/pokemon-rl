@@ -788,3 +788,63 @@ Target: ExplVar > 0.20 by 100K steps, WR improvement trend by 200K steps.
 Switch mean bias: -0.039, Move mean bias: +0.058. Nearly neutral — the model
 has freedom to switch but doesn't because the value function doesn't credit it.
 This confirms the bottleneck is advantage quality, not action bias.
+
+---
+
+## 2026-04-04 — Run 054 Failed: Config Tuning Cannot Fix Structural Problems
+
+Run 054 (n_steps=4096, n_epochs=4, vf_coef=1.0) killed at 177K steps. ExplVar
+0.07–0.13 (same or worse than run 052). BestMv% 58.7% (better BC preservation).
+WR 52% (same plateau). Config-only changes confirmed as anti-pattern for this
+project.
+
+---
+
+## 2026-04-04 — Offline Ceiling Experiment: Returns Are Unpredictable at gamma=0.99
+
+### The Experiment
+Collected 9,515 (obs, return) pairs from 300 games. Fit offline regressors with
+5-fold cross-validation. Every model scored CV R² < 0 — worse than predicting
+the mean.
+
+### Root Cause: Three Compounding Factors
+1. **gamma=0.99** creates 100-step effective horizon. Return at step 1 includes
+   rewards from step 30. Observation at step 1 can't predict step 30 events.
+2. **matchup_baseline** removes the most predictable signal (team quality) from
+   terminal rewards.
+3. **Partial observability** — opponent's 1-5 hidden Pokemon have massive
+   return impact but aren't observable.
+
+### Implication
+PPO's ExplVar=0.12 is in-sample memorization, not real predictive ability.
+Advantages computed from this V(s) are random noise. This explains why NO run
+in this project has ever improved WR beyond the BC warm-start — the learning
+signal is random.
+
+---
+
+## 2026-04-04 — Gamma 0.99 → 0.95: Making the Problem Solvable
+
+### Mini-Experiments (50K steps each, no critic warmup)
+
+| Config | ExplVar @ 50K | BestMv% | WR |
+|--------|--------------|---------|-----|
+| gamma=0.99 (run 054, WITH warmup) | +0.137 | 58.4% | 54% |
+| **gamma=0.95 (no warmup)** | **+0.133** | 57.9% | 55% |
+| gae_lambda=1.0 (MC returns) | -0.381 | 56.9% | 50% |
+
+### Decision
+gamma=0.95. One-line change. Effective horizon shrinks from 100 to 20 steps.
+V(s) only predicts near-future events (observable from current state). MC
+returns (lambda=1.0) rejected — ExplVar never goes positive, BC erodes.
+
+### What Was Rejected
+| Rejected | Reason |
+|----------|--------|
+| gae_lambda=1.0 | ExplVar stays deeply negative, BestMv% erodes |
+| gamma=0.90 | Not tested — 0.95 works, may be too myopic |
+| More config tuning | Anti-pattern — run 054 proved it doesn't work |
+
+### Also Fixed
+selfplay_train.py hyperparams synced with train.py (was still gamma=0.99,
+n_epochs=10, clip_range=0.2, LR=3e-4 — all known-bad settings).
