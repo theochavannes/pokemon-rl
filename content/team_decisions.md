@@ -470,3 +470,261 @@ Full migration plan for re-introducing two-tower at the right time: `notes/two_t
 | Opp revealed | 76 | 100 | +24 |
 | Global | 15 | 16 | +1 |
 | **Total** | **1222** | **1559** | **+337** |
+
+---
+
+## 2026-04-04 — Root Cause Analysis: Why PPO Cannot Learn (Full Team Review)
+
+### The Problem
+Across ALL training runs (043, 046, 047, 048), ExplVar stays negative and the BC policy erodes. The value function never learns, meaning PPO operates on random advantage estimates.
+
+### Previous Diagnosis Was WRONG
+
+`context_for_planning.md` blamed `share_features_extractor=True` for preventing the critic from learning independently. Full team review revealed:
+
+**For MlpPolicy, FlattenExtractor has ZERO learnable parameters.** The actor MLP (1559→256→128→10) and critic MLP (1559→256→128→1) already have completely separate parameters. There is no shared learned layer. Setting `share_features_extractor=False` creates two FlattenExtractors (still no params each) — it changes nothing.
+
+The warmstart_critic.py was training the correct parameters (mlp_extractor.value_net + value_net). It was NOT hampered by shared features — there are no shared features to be hampered by.
+
+### Actual Root Cause: Chicken-and-Egg Value Bootstrap
+
+PPO's GAE advantages depend on V(s). V(s) starts random. Its training targets (R_t = A_t + V_t) depend on V(s) itself. This creates a circular dependency:
+
+1. Random V → garbage advantages → random policy gradient
+2. Random gradient erodes BC prior
+3. Policy changes → state distribution shifts → V can't catch up
+4. Spiral continues until all BC knowledge is gone
+
+This is a **fundamental limitation** of bootstrapped advantage estimation (GAE with lambda < 1). The value function is trying to learn from targets that are themselves corrupted by the bad value function.
+
+### Why Critic Warmstart Alone Failed (Run 047)
+
+The warmstart trained the critic offline on (obs, return) data from 1000 games. But during PPO:
+- The critic's predictions are used to compute GAE targets
+- GAE targets are used to re-train the critic
+- The online updates quickly overwrite the warmstart weights with self-referential garbage
+- Within 10-20K steps, the warmstart effect is gone
+
+### The Fix: Actor Freeze Protocol
+
+**Freeze actor → train only critic → unfreeze when ExplVar > 0.**
+
+By freezing the actor, the policy (and thus the state distribution) stays fixed at BC quality. The value function can learn V^{π_BC}(s) as a standard supervised regression problem — no circular dependency because the policy doesn't change.
+
+Once V is reliable (ExplVar > 0), unfreeze the actor with conservative settings. PPO can now compute accurate advantages and improve the policy in the correct direction.
+
+### Secondary Finding: Monitoring Bug
+
+`callbacks.py:_move_damages_from_obs` uses stride 14 for moves, but the actual obs layout has stride 26 (25 features + 1 target_statused). BestMv% and DmgEff metrics are wrong for moves 1-3 in ALL runs since Sprint 5.
+
+### Decision
+
+Implement actor freeze protocol. See `notes/plan_fix_value_function_2026-04-05.md` for full execution plan.
+
+| What | Action |
+|------|--------|
+| `share_features_extractor=False` | **NOT doing it** — no functional difference for MlpPolicy |
+| Critic warmstart | Improve (more games, match reward fn) but don't rely on it alone |
+| Actor freezing | **PRIMARY FIX** — freeze actor for first 100K PPO steps |
+| Conservative unfreeze | clip_range 0.1→0.2 ramp, lower effective actor LR |
+| Monitoring fix | Fix stride bug in callbacks.py |
+
+---
+
+## 2026-04-04 — Process Discipline: Antigravity Skills Added to Team
+
+### The Problem
+Every plan the team produced was built on an unverified hypothesis. 100% failure rate. The pattern: hypothesize root cause → build 500-line plan → execute → discover hypothesis was wrong → repeat.
+
+Examples:
+- "shared_features_extractor causes critic to not learn" → wrong (FlattenExtractor has zero params)
+- "critic warmstart will fix it" → failed (online PPO updates overwrote warmstart in 10-20K steps)
+- "two-tower architecture will help" → made it worse (BC couldn't optimize it, 46.6% accuracy)
+
+### Decision
+Added 5 process discipline skills to AGENTS.md. These are not new team members — they are process gates the existing team must follow.
+
+| Skill | What it enforces |
+|---|---|
+| `/systematic-debugging` | No fixes without verified root cause (4-phase) |
+| `/phase-gated-debugging` | Can't edit source code until root cause confirmed by evidence |
+| `/planning-with-files` | Save findings every 2 actions during research/debug sessions |
+| `/closed-loop-delivery` | Task incomplete until acceptance criteria verified in actual metrics |
+| `/evaluation` | Regression tests catch training quality regressions automatically |
+
+**Hard rule added:** Before any plan proposing code changes, team must complete a debugging pass with empirical evidence.
+
+### New Prompt Structure
+The next execution prompt (`notes/prompt_diagnostic_plan_2026-04-05.md`) separates diagnosis from planning with hard gates. Phase 1 forces empirical root cause verification. Phase 2 is team design review. Phase 3 writes the plan ONLY after evidence exists. Phase 3.2 requires a quick validation experiment before committing to the full plan.
+
+### Rationale
+The team has domain expertise but lacked process discipline. The skills don't replace the team — they add the verification rigor that was missing. The cost is ~30 min of upfront diagnosis. The benefit is not wasting days on plans built on wrong assumptions.
+
+---
+
+## 2026-04-05 �� Deep Diagnostic: The "Chicken-and-Egg" Hypothesis Was INCOMPLETE
+
+### The Prompt That Changed Everything
+
+Prompted with `/systematic-debugging` methodology and hard gates requiring
+empirical evidence before ANY fix proposals. The previous plan
+(`notes/plan_fix_value_function_2026-04-05.md`) proposed actor freezing based on
+the theory that the value function "always stays negative." The instruction was:
+**PROVE OR DISPROVE this before building another plan.**
+
+### Finding #1: Run 043 Had POSITIVE ExplVar
+
+The foundational claim — "ExplVar stays negative across all runs (043, 046, 047,
+048)" — was wrong. Run 043 training logs show:
+
+| Step range | ExplVar readings |
+|------------|------------------|
+| 0-50K | +0.01, +0.12, +0.05, +0.11, +0.15, +0.14, +0.02, +0.08 |
+| 50K-100K | +0.19, +0.17, +0.26, +0.17, +0.13, +0.10, +0.12 |
+
+The value function WAS learning in run 043. It explained 1-26% of return
+variance. But PPO STILL didn't improve — win rate stuck at ~50%.
+
+**Implication:** Fixing the value function (the entire goal of the previous plan)
+is necessary but NOT sufficient. There's a deeper problem.
+
+### Finding #2: Architecture Changes Don't Explain the Difference
+
+SB3 v1.8.0+ has NO shared hidden layers. Checked the source:
+`MlpExtractor` in `torch_layers.py` creates separate `nn.Sequential` for
+`policy_net` and `value_net` regardless of whether `net_arch` is a list or dict.
+
+Both `net_arch=[64,64]` and `net_arch=dict(pi=[256,128], vf=[256,128])` create
+completely independent networks with zero shared parameters.
+
+**Implication:** The "shared features extractor" diagnosis from the previous day
+was wrong (correctly identified), AND the hypothesis that run 043's architecture
+was fundamentally different is ALSO wrong. Same architecture pattern, just
+different sizes.
+
+### Finding #3: Three Interacting Problems, Not One
+
+| Layer | Problem | Evidence |
+|-------|---------|----------|
+| 1. Value init | 432K-param value_net starts random, can't converge at 3e-4 LR | Run 043 ([64,64], 104K params, LR 1e-4): ExplVar positive by 8K. Runs 046/048 ([256,128], 432K params, LR 3e-4): ExplVar mostly negative |
+| 2. BC erosion | PPO updates destroy BC knowledge at ~0.04%/K steps | BestMv% declines monotonically in ALL runs regardless of ExplVar |
+| 3. Signal/noise | Even with positive ExplVar, advantage estimates are too noisy for improvement | Run 043: ExplVar up to 0.26, win rate still 50% over 365K steps |
+
+The previous plan proposed actor freezing, which addresses Layer 2 only.
+
+### Finding #4: Key Hyperparameter Differences Between Runs
+
+| Parameter | Run 043 (partial success) | Runs 046/048 (failure) |
+|-----------|--------------------------|------------------------|
+| net_arch | [64,64] (default) | dict(pi=[256,128], vf=[256,128]) |
+| learning_rate | 1e-4 constant | 3e-4 → 1e-4 linear |
+| batch_size | 64 | 128 |
+| Value net params | ~104K | ~432K |
+
+The 3x higher starting LR in runs 046/048 is a likely contributor to both:
+- Faster BC erosion (larger policy updates)
+- Value function instability (larger, noisier value updates)
+
+### Decision: Three-Pronged Fix
+
+| What | Why |
+|------|-----|
+| **Copy policy_net → value_net** (NEW) | Give value function pre-trained features from BC. Reduces training from 432K random params to 129-param value head. |
+| **Actor freeze** (from previous plan, kept) | Protect BC policy while value head fine-tunes on stable distribution. |
+| **gae_lambda=1.0 during warmup** (NEW) | Use pure MC returns during freeze phase. No value bootstrap = no circular dependency. |
+| **LR=1e-4 constant** (CHANGED from previous plan) | Run 043's LR worked. The 3e-4 schedule was too aggressive. |
+| **clip_range=0.1** (CHANGED from previous plan) | Conservative policy updates to slow BC erosion. |
+
+### What Was Kept From the Previous Plan
+- Actor freeze/unfreeze mechanism (correct approach for Layer 2)
+- Fix `_move_damages_from_obs` stride bug in callbacks.py
+- Fix stale OBS_DIM in behavioral_cloning.py
+- Escalation plans (refined with new failure modes)
+
+### What Was Changed
+- Root cause expanded from 1 layer to 3
+- Added weight copy (addresses Layer 1 — previous plan had no fix for this)
+- Added gae_lambda=1.0 during warmup (addresses Layer 3's bootstrap issue)
+- Changed LR from schedule to constant 1e-4 (evidence-based)
+- Added two quick validation experiments BEFORE implementation (30 min each)
+- Added "ExplVar positive but no improvement" escalation (run 043 scenario)
+- Reduced warmup steps from 100K to 50K (weight copy means faster convergence)
+
+### What Was Rejected
+- Separate critic warmstart script (replaced by weight copy — simpler, faster)
+- Two-tower architecture (still deferred — BC can't optimize it)
+- VecNormalize (still proven harmful)
+- share_features_extractor=False (no functional effect for MlpPolicy)
+
+### Validation Gate
+Two 30-minute experiments must complete before committing to the full fix:
+1. Train from scratch (no BC) → does ExplVar go positive?
+2. BC warm-start with LR=1e-4 constant → does ExplVar match run 043?
+
+Full plan at `notes/plan_2026-04-06.md`.
+
+---
+
+## 2026-04-05 — Validation Experiments: n_epochs is the Key (Verified)
+
+### The Smoking Gun: bc_warmstart.zip Already Has ExplVar 0.99
+
+Before running experiments, investigated the critic warmstart directly. The file
+`models/bc_warmstart.zip` was saved AFTER `warmstart_critic.py` ran — it already
+has a trained value function with ExplVar=0.99 on its training data.
+
+Run 047 used this model and ExplVar collapsed to -0.26 in 23K PPO steps. The
+weight diffs were TINY (mean abs 0.02 per layer). PPO's online value updates
+destroyed a nearly-perfect value function with small perturbations.
+
+### Experiment Results (7 configurations tested)
+
+| Config | ExplVar@50K | Key Variable |
+|--------|-------------|-------------|
+| From scratch, LR=3e-4, n_epochs=10 | +0.106 | Baseline: value CAN learn |
+| BC+warmstart, LR=1e-4, n_epochs=10 | -0.121 | n_epochs=10 destroys warmstart |
+| BC+warmstart, LR=3e-4, n_epochs=10 | -0.166 | Higher LR makes it worse |
+| **BC+warmstart, LR=1e-4, n_epochs=3** | **+0.048** | **n_epochs=3 preserves warmstart** |
+| BC+freeze, LR=1e-4, n_epochs=10 | -0.134 | Freeze alone not enough |
+| **BC+freeze, LR=1e-4, n_epochs=3** | **+0.185** | **WINNER: freeze + fewer epochs** |
+| BC+freeze, gae_lambda=1.0 | -0.802 | Pure MC returns catastrophic |
+
+### Root Cause: n_epochs=10 Overfits Per Rollout
+
+With n_epochs=10 and batch_size=128 on 8192 samples per rollout, PPO does 640
+gradient steps per rollout on the value function. A 432K-param network memorizes
+this small dataset, losing generalization. With n_epochs=3, it does 192 gradient
+steps — enough to learn but not enough to overfit.
+
+### Decision: Applied Configuration
+
+```python
+PPO_KWARGS = dict(
+    n_epochs=3,          # Was 10 — prevents value function overfitting per rollout
+    clip_range=0.1,      # Was 0.2 — conservative to preserve BC knowledge
+    learning_rate=1e-4,  # Was 3e-4→1e-4 — constant rate, proven in run 043
+)
+CRITIC_WARMUP_STEPS = 50_000  # Actor frozen, only critic trains
+```
+
+### Run 052 Status (in progress)
+
+Warmup completed successfully (ExplVar climbing from -0.03 to +0.17 during
+freeze). Actor unfroze at step ~57K. Curriculum phase "League" running.
+
+Early post-unfreeze metrics:
+- ExplVar: +0.067 (positive, stable)
+- BestMv%: 58.0-58.3% (BC knowledge preserved — NOT eroding)
+- Win rate: 45-67% (oscillating but not collapsing)
+
+This is the first run with the [256,128] architecture to maintain positive
+ExplVar AND stable BC knowledge simultaneously.
+
+### What Was Rejected (with evidence)
+
+| Rejected | Reason | Evidence |
+|----------|--------|----------|
+| gae_lambda=1.0 | Pure MC returns catastrophic for value learning | Experiment C3: ExplVar = -0.80 |
+| Actor freeze alone (n_epochs=10) | Freeze not sufficient without reducing epochs | Experiment C: ExplVar = -0.13 |
+| Weight copy (policy→value) | Warmstart already works (ExplVar 0.99). Problem was preservation, not initialization | Warmstart investigation |
+| Higher LR (3e-4) | Destroys warmstart faster | Experiment B2 vs B |
