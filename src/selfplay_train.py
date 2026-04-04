@@ -48,13 +48,13 @@ OPPONENT_UPDATE_FREQ = 50_000
 PPO_KWARGS = dict(
     policy="MlpPolicy",
     n_steps=2048,
-    batch_size=64,
-    n_epochs=10,
-    gamma=0.99,
+    batch_size=128,
+    n_epochs=3,  # Matches curriculum — n_epochs=10 overfits value fn per rollout
+    gamma=0.95,  # Matches curriculum — shorter horizon for learnable value function
     gae_lambda=0.95,
-    clip_range=0.2,
-    ent_coef=0.01,  # Entropy bonus — prevents policy collapse to a single action
-    learning_rate=3e-4,
+    clip_range=0.1,  # Conservative to preserve learned policy
+    ent_coef=0.01,
+    learning_rate=1e-4,  # Matches curriculum — constant rate
     verbose=0,
 )
 
