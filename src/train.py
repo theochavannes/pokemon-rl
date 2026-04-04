@@ -48,23 +48,18 @@ BATTLE_FORMAT = "gen1randombattle"
 N_ENVS = 4
 
 
-def _lr_schedule(progress_remaining: float) -> float:
-    """Linear LR schedule: 3e-4 → 1e-4 over training."""
-    return 1e-4 + (3e-4 - 1e-4) * progress_remaining
-
-
 PPO_KWARGS = dict(
     policy="MlpPolicy",
     policy_kwargs=dict(net_arch=dict(pi=[256, 128], vf=[256, 128])),
     n_steps=2048,
     batch_size=128,
-    n_epochs=10,
+    n_epochs=3,  # Was 10 — n_epochs=10 overfits value fn per rollout, destroying warmstart
     gamma=0.99,
     gae_lambda=0.95,
-    clip_range=0.2,
+    clip_range=0.1,  # Was 0.2 — conservative to preserve BC knowledge (run 043 lesson)
     max_grad_norm=0.5,
     ent_coef=0.01,
-    learning_rate=_lr_schedule,  # 3e-4 → 1e-4 linear anneal
+    learning_rate=1e-4,  # Was 3e-4→1e-4 schedule — constant 1e-4 worked in run 043
     verbose=1,
 )
 
@@ -83,6 +78,37 @@ CURRICULUM = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Actor freeze/unfreeze for critic warmup phase
+# ---------------------------------------------------------------------------
+
+CRITIC_WARMUP_STEPS = 50_000
+
+
+def _freeze_actor(model) -> None:
+    """Freeze all actor parameters — only the critic trains."""
+    frozen = 0
+    for param in model.policy.mlp_extractor.policy_net.parameters():
+        param.requires_grad = False
+        frozen += param.numel()
+    for param in model.policy.action_net.parameters():
+        param.requires_grad = False
+        frozen += param.numel()
+    print(f"  [Actor Freeze] Froze {frozen:,} actor parameters")
+
+
+def _unfreeze_actor(model) -> None:
+    """Unfreeze all actor parameters — full PPO training resumes."""
+    unfrozen = 0
+    for param in model.policy.mlp_extractor.policy_net.parameters():
+        param.requires_grad = True
+        unfrozen += param.numel()
+    for param in model.policy.action_net.parameters():
+        param.requires_grad = True
+        unfrozen += param.numel()
+    print(f"  [Actor Unfreeze] Unfroze {unfrozen:,} actor parameters")
+
+
 def _prevent_sleep() -> None:
     ES_CONTINUOUS = 0x80000000
     ES_SYSTEM_REQUIRED = 0x00000001
@@ -95,9 +121,9 @@ def main(new_run: bool = False) -> None:
     _prevent_sleep()
 
     # Build JSON-safe config snapshot (exclude non-serializable callables/classes)
-    config_snapshot = {k: v for k, v in PPO_KWARGS.items() if k not in ("policy_kwargs", "learning_rate")}
+    config_snapshot = {k: v for k, v in PPO_KWARGS.items() if k != "policy_kwargs"}
     config_snapshot["policy_kwargs"] = {"net_arch": {"pi": [256, 128], "vf": [256, 128]}}
-    config_snapshot["learning_rate"] = "linear_schedule(3e-4 -> 1e-4)"
+    config_snapshot["critic_warmup_steps"] = CRITIC_WARMUP_STEPS
 
     run = RunManager(
         run_type="curriculum",
@@ -258,6 +284,75 @@ def main(new_run: bool = False) -> None:
         print(f"  Rollout   : {PPO_KWARGS['n_steps']} steps × {N_ENVS} env(s)")
         print("  Eval every: 50 battles")
         print()
+
+        # ── Critic warmup phase (actor frozen) ──────────────────────
+        # The BC warm-start includes a pre-trained critic (via warmstart_critic.py).
+        # PPO's online value updates destroy the warmstart within 10-20K steps
+        # (run 047 evidence: ExplVar 0.99 → -0.26 in 23K steps).
+        # Freezing the actor keeps the state distribution stable so the critic
+        # can adapt to the online GAE targets without being destroyed.
+        if is_fresh_run and resume_path is None and CRITIC_WARMUP_STEPS > 0:
+            print(f"\n{'=' * 60}")
+            print("  PHASE 0: Critic Warmup (actor frozen)")
+            print(f"  Steps: {CRITIC_WARMUP_STEPS:,}  |  Actor: FROZEN")
+            print("  Purpose: Let value function adapt to online GAE targets")
+            print("  on a stable state distribution (BC policy unchanged).")
+            print(f"{'=' * 60}\n")
+
+            _freeze_actor(model)
+
+            # Collect opponent refs for warmup callback
+            warmup_opponents = []
+            if hasattr(env, "envs"):
+                for e in env.envs:
+                    if hasattr(e, "_opponent"):
+                        warmup_opponents.append(e._opponent)
+
+            # Compute epsilon schedule from phase config for warmup
+            warmup_eps_sched = None
+            if epsilon_start is not None:
+                warmup_eps_sched = (epsilon_start, phase.get("epsilon_end", 0.0))
+
+            warmup_cb = WinRateCallback(
+                window=100,
+                eval_freq=10_000,
+                save_path=run.models_dir,
+                replay_dir=replay_dir,
+                notable_dir=str(Path(run.run_dir) / "replays" / "notable"),
+                verbose=1,
+                stop_at_win_rate=None,  # Don't stop on win rate during warmup
+                phase_label="CriticWarmup",
+                training_log_path=run.training_log,
+                run_id=run.run_id,
+                epsilon_schedule=warmup_eps_sched,
+                opponents=warmup_opponents,
+                run_manager=run,
+                phase_name="warmup",
+                selfplay_path=selfplay_path,
+                env=env,
+            )
+
+            model.learn(
+                total_timesteps=CRITIC_WARMUP_STEPS,
+                callback=[warmup_cb],
+                reset_num_timesteps=True,
+            )
+
+            # Check critic quality after warmup
+            sb3_vals = getattr(model.logger, "name_to_value", {})
+            final_ev = sb3_vals.get("train/explained_variance", float("nan"))
+            final_vl = sb3_vals.get("train/value_loss", float("nan"))
+            print("\n  Critic warmup complete.")
+            print(f"  Final ExplVar: {final_ev:.3f}  |  Value loss: {final_vl:.4f}")
+            if final_ev > 0:
+                print("  [OK] Value function is learning. Unfreezing actor.")
+            else:
+                print("  [WARN] ExplVar still negative. Unfreezing anyway -- monitor closely.")
+
+            _unfreeze_actor(model)
+            is_fresh_run = False  # Don't reset timesteps when curriculum starts
+            global_episodes += warmup_cb._total_episodes
+            print()
 
         # Collect opponent refs for epsilon annealing + selfplay swap (DummyVecEnv only)
         opponents = []

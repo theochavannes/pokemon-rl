@@ -393,3 +393,135 @@ The obs space went from 1222 to 1559 dimensions. But each new feature encodes so
 - Is Dream Eater even useful right now? (requires_sleep)
 - How many times can I use this move? (pp_max)
 - What turn is it? (turn_phase — early game vs endgame changes everything)
+
+---
+
+## Act 9: The Diagnosis (2026-04-04)
+
+### The Full Team Review That Changed Everything
+**Hook:** "We spent a day reading every line of code, every training log, every failed experiment. And we found out the diagnosis we'd been working from was wrong."
+
+After 48 runs and 0 progress, the GM demanded answers. The full team (ML, SYS, REVIEW, SE, RL, SB3, GYM, POKE-ENV) convened for a deep forensic review of the codebase.
+
+**The wrong diagnosis we'd been operating on:** "The actor and critic share a features extractor. BC only trains the actor path. The critic's features never get trained." This sounded right. It was in the planning doc. Three runs were designed around fixing it.
+
+**The truth:** For MlpPolicy, the "shared features extractor" is `nn.Flatten()` — a parameter-free reshape operation. **There are no shared learned parameters.** The actor has its own 1559→256→128→10 network. The critic has its own 1559→256→128→1 network. Completely separate. The "fix" everyone was working toward would have changed literally nothing.
+
+**Visual:** Architecture diagram showing the two completely separate networks with the word "SHARED" crossed out over the Flatten layer. "The thing we thought was the problem... wasn't even a thing."
+
+### The Real Problem: Chicken-and-Egg
+**Hook:** "PPO needs a good value function to know which direction to improve. But the value function needs a good policy to learn from. Neither can go first."
+
+PPO computes advantages using: A_t = r_t + γV(s_{t+1}) - V(s_t). When V is random, A_t is random. Random advantages → random policy gradient → BC knowledge erodes. The policy changes → new state distribution → V has to relearn. Neither component can stabilize.
+
+**Visual:** Circular dependency diagram. V → A → π → states → V. "A circle where every node is wrong."
+
+### The Actor Freeze Solution
+**Hook:** "What if we just... stopped the policy from changing?"
+
+The fix is almost comically simple: set `requires_grad=False` on the actor parameters. The policy stays at BC quality. The state distribution is fixed. The value function can learn as a normal supervised regression problem. When ExplVar goes positive, unfreeze the actor. Now PPO has reliable advantages and can actually improve.
+
+**Visual:** Before — the circular dependency with all arrows red. After — the arrow from π back to V is cut (frozen). The value function can now learn without the ground shifting beneath it.
+
+### The Hidden Monitoring Bug
+**Hook:** "We also found out that every metric we've been tracking for the last 8 runs was wrong."
+
+The `_move_damages_from_obs` function in callbacks.py reads move features with a stride of 14 (the original per-move feature count). The actual stride is 26. Moves 1-3 have been reading garbage observation indices. BestMv% and DmgEff — our two key behavioral metrics — have been unreliable since Sprint 5.
+
+**Visual:** Show the observation layout with arrows pointing to what the code THINKS it's reading vs what it's ACTUALLY reading. "This reads base_power. This reads... trapping flag. Off by 12 indices."
+
+**Why it matters for the video:** This is the "our instruments were broken" reveal. You can't navigate if your compass is lying to you. Every decision based on BestMv% trends was based on bad data.
+
+### What to Watch For in Training
+- **During actor freeze:** ExplVar climbing from negative toward positive. Win rate staying stable (BC quality preserved). "The critic is learning while the player holds still."
+- **After unfreeze:** Win rate increasing beyond BC baseline. ExplVar staying positive. The moment the lines cross is the climax: "The AI is now better than its teacher."
+- **The contrast shot:** Runs 046/048 (no freeze, ExplVar negative, BC erodes) vs the new run (freeze phase, ExplVar climbs, unfreeze, win rate improves). Same codebase, same data, one PyTorch flag different.
+
+---
+
+## Act 11: The Deeper Diagnosis (2026-04-05)
+
+### "The Diagnosis of the Diagnosis Was Wrong"
+**Hook:** "We built a 500-line plan around a theory we never tested. Then we tested it. It was wrong — in a way that made us find the REAL answer."
+
+The previous session diagnosed "chicken-and-egg value bootstrap" as the root cause and proposed actor freezing. Before executing, the prompt for this session demanded: PROVE the hypothesis with evidence. Don't build another plan on guesswork.
+
+**The smoking gun:** Run 043 had POSITIVE ExplVar the entire time (0.01-0.26). The claim "ExplVar stays negative across all runs" — the foundation of the previous plan — was factually wrong for run 043. The value function DID learn. PPO STILL didn't improve.
+
+**Visual:** Side-by-side ExplVar charts. Run 043: consistently positive (green). Run 048: mostly negative (red). Both: win rate stuck at 50%. "The value function was working. The agent wasn't."
+
+### Three Problems, Not One
+**Hook:** "It wasn't a bug. It was three bugs standing on each other's shoulders in a trenchcoat."
+
+1. **The value network was 4x too big.** Run 043 used [64,64] (104K params). Run 048 used [256,128] (432K params). Starting from random init, the bigger network couldn't converge. "Like teaching a new brain — the bigger the brain, the longer it takes to wake up."
+
+2. **PPO was eroding the BC knowledge.** BestMv% declined in EVERY run at ~0.04%/K steps. PPO's noisy advantages were slowly overwriting the expert knowledge. "Like a student taking random advice that slowly makes them forget what they actually know."
+
+3. **Even with a working value function, the signal was too weak.** Run 043 proved this: ExplVar positive, win rate flat. The advantage estimates explain only 10-25% of return variance. The rest is team composition RNG. "Even with a working compass, the wind is too strong."
+
+**Visual:** Three-layer diagram. Layer 1 (value init): "cold start." Layer 2 (BC erosion): "knowledge drain." Layer 3 (signal): "needle in a haystack." "You can't solve layer 3 without solving layers 1 and 2 first."
+
+### The Weight Copy Insight
+**Hook:** "The fix for the value function wasn't to train it harder. It was to give it a cheat sheet."
+
+After BC training, the policy network already learned to process 1559 dims of Pokemon battle state into 128 useful features. Those features know what makes a move good, what types match up, when a Pokemon is in trouble. The value function needs those exact same features — it just needs to learn "is this a good or bad game state?" on top of them.
+
+So: copy the policy_net weights to the value_net. 432K parameters of useful features, instantly initialized. The value head (128→1) is 129 parameters that need to learn from scratch — trivial.
+
+**Visual:** Animated weight transfer. Left network (policy) lights up blue — "trained by BC." Weights flow to right network (value). "Same features, new purpose. 432,000 parameters instantly useful."
+
+### The Validation-First Approach
+**Hook:** "This time, we're testing before we build."
+
+Two 30-minute experiments before committing to the full plan:
+- Experiment A: Train from scratch (no BC). Does ExplVar go positive? If no, the obs space is broken.
+- Experiment B: Use run 043's hyperparams (LR=1e-4) with [256,128]. Does ExplVar match run 043? If yes, the learning rate was the whole problem.
+
+**Visual:** Decision tree. "If A and B both fail → fundamental obs space issue. If A passes, B fails → BC handoff problem. If both pass → we were overthinking it."
+
+**Why it's great content:** This is the "scientific method" moment. After 48 runs of hypothesis → build → fail, the team finally stops and says "let's just test the hypothesis first." The audience sees ML research done right.
+
+### The Warmstart Was Already Perfect
+**Hook:** "The value function we've been trying to fix for days was already at 99% accuracy. The problem was that PPO kept breaking it."
+
+The critic warmstart script produced a value function with ExplVar 0.99 — it perfectly predicted game returns. But after 23K steps of PPO, the same value function had ExplVar -0.26. The weight changes between the two were barely measurable (mean absolute diff: 0.02). PPO's 10 training epochs per rollout were overfitting the value network to tiny batches, destroying its ability to generalize.
+
+**Visual:** ExplVar gauge: starts at 0.99 (green). After PPO step 1: 0.95. Step 2: 0.80. Step 3: 0.40. Step 10K: -0.26 (red). "A nearly perfect value function, destroyed in minutes."
+
+### 7 Experiments, 1 Answer: n_epochs=3
+**Hook:** "We ran 7 experiments in parallel. Six failed. One worked. The difference was a single number."
+
+Tested every combination: high LR, low LR, frozen actor, unfrozen, MC returns, bootstrap. Only configs with n_epochs=3 (instead of 10) maintained positive ExplVar. The value network was memorizing each rollout's 8192 data points in 10 passes, then forgetting how to generalize.
+
+**Visual:** Bar chart of 7 experiments. Six red bars (negative ExplVar). One green bar (C2: freeze + n_epochs=3, ExplVar +0.185). Circle the "3" in n_epochs=3. "This one number."
+
+### The Training Run That Actually Works (run_052)
+**Hook:** "For the first time in 52 runs, the value function stayed positive after unfreeze."
+
+Warmup phase: actor frozen for 50K steps. ExplVar climbed from -0.03 to +0.17. BestMv% held perfectly at 57-58% (BC knowledge preserved). Then the actor unfroze. ExplVar: still positive at +0.07. BestMv%: 58% and stable. Win rate: 45-67%.
+
+Compare with run 048: ExplVar immediately negative, BestMv% declining from step 1.
+
+**Visual:** Split training curve. Run 048 (red): ExplVar dips negative immediately, BestMv% declines. Run 052 (green): ExplVar stays positive through warmup and post-unfreeze. "The same architecture, the same data, three numbers changed."
+
+---
+
+## Act 10: Process Discipline (2026-04-04)
+
+### The Team That Kept Building Plans on Wrong Assumptions
+**Hook:** "We've had 48 failed training runs. The last plan was 500 lines long and built on a diagnosis that was wrong. What if the process itself is the bug?"
+
+After the GM demanded accountability, the team realized a pattern: every plan hypothesized a root cause, immediately built an elaborate fix around it, then failed because the hypothesis was never tested. The shared-features-extractor diagnosis? Wrong. The critic warmstart approach? Built on the wrong assumption. The two-tower architecture? Solved a problem that wasn't the bottleneck.
+
+**The fix:** Added 5 process discipline tools (antigravity skills) to AGENTS.md:
+- `/systematic-debugging` — no fixes without verified root cause
+- `/phase-gated-debugging` — 5-phase gate, can't edit code until root cause confirmed
+- `/planning-with-files` — save findings every 2 actions, never lose context
+- `/closed-loop-delivery` — task incomplete until metrics prove it works
+- `/evaluation` — regression tests catch "ExplVar went negative" automatically
+
+**New hard rule:** Before any plan that proposes code changes, the team must complete a debugging pass. Plans on unverified hypotheses have a 100% failure rate so far.
+
+**Visual:** Timeline of failed diagnoses — "shared features extractor" (wrong), "critic warmstart insufficient" (symptom not cause), "two-tower will fix it" (made it worse). Each one with a big red X. Then the new rule: "PROVE IT FIRST."
+
+**Why it's great content:** Meta-learning moment. The team isn't just training an AI — they're learning how to debug AI. The audience sees that ML research is 90% diagnosis and 10% implementation.

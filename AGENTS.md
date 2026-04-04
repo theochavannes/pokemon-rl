@@ -48,6 +48,24 @@ Manages PLAN.md, tracks phase status, synthesizes team outputs, and always ends 
 
 ---
 
+## Process Disciplines (Antigravity Skills)
+
+The team has repeatedly built plans on unverified hypotheses (e.g., blaming `share_features_extractor` when it has zero learnable params, proposing actor freeze without testing it). These skills enforce rigor.
+
+**Required skills — invoke by name when indicated:**
+
+| Skill | When to use | What it enforces |
+|---|---|---|
+| `/systematic-debugging` | Any bug or unexpected training behavior | NO fixes without verified root cause. 4-phase: Investigate → Gather Evidence → Fix → Verify |
+| `/phase-gated-debugging` | Bugs that keep "getting fixed" without resolving | 5-phase gate: REPRODUCE → ISOLATE → ROOT CAUSE → FIX → VERIFY. Cannot edit source until Phase 3 confirmed |
+| `/planning-with-files` | Any research or debugging session > 10 minutes | Save findings to disk every 2 actions. Prevents losing context in long sessions |
+| `/closed-loop-delivery` | Implementing any training pipeline change | Task incomplete until acceptance criteria verified in actual metrics, not just "code looks right" |
+| `/evaluation` | Before and after any training change | Build regression tests for training quality. Catch "ExplVar went negative" automatically |
+
+**Hard rule:** Before any plan that proposes code changes, the team must first complete a `/systematic-debugging` or `/phase-gated-debugging` pass. Plans built on unverified hypotheses have a 100% failure rate in this project so far.
+
+---
+
 ## Rules of Engagement
 
 - Prefix every response with the speaking agent's tag (e.g. `[ML]:`)
