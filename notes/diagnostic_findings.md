@@ -281,3 +281,171 @@ This takes ~30 min and is the single most informative experiment we can run.
 | BC erosion rate | ~0.04%/K steps | ~0.03%/K steps |
 | BC teacher | MaxDamage (simple) | SmartHeuristic (complex) |
 | State diversity | Low | High |
+
+---
+
+## 2026-04-04 — Run 052 Status (Phase 0 Analysis)
+
+**Run 052** (started 2026-04-04 09:30) applied the n_epochs=3 fix with 50K critic
+warmup and LR=1e-4 constant. This is the first [256,128] run to maintain positive
+ExplVar AND stable BC knowledge simultaneously. However, after 230K post-unfreeze
+steps (287K total), training has plateaued. Win rate oscillates 44–67% per eval
+(mean ~54%) with zero upward trend. BestMv% eroded only 0.7pp (58.3→57.6%) over
+228K steps — 10x slower than old runs — confirming BC preservation works. ExplVar
+averages ~0.12 (range +0.03 to +0.26), positive but low. The agent has near-zero
+voluntary switching (0.6–0.7%). Temperature is stuck at ~0.95–1.05 (equilibrium:
+at 54% WR the annealing formula targets temp=0.99). Per-opponent: SelfPlay ~49%,
+MaxDmg ~54%, TypeMatch ~44% (declining from 62%), SoftmaxDmg ~67%.
+
+**Bottom line:** The value function fix (n_epochs=3, critic warmup) solved the
+ExplVar collapse and BC erosion problems. But PPO still can't improve. The agent
+is a slightly fuzzy MaxDamagePlayer with no switching skill, hitting a hard
+ceiling against diverse opponents.
+
+---
+
+## 2026-04-04 — Phase 1: Bottleneck Diagnosis
+
+### What is the agent failing to do?
+
+1. **Win rate not improving:** 54% aggregate WR at step 287K, essentially identical
+   to step 59K (52%) when the actor unfroze. 228K steps of PPO with no gain.
+2. **No voluntary switching:** 0.6–0.7% vol switch rate. The agent never switches
+   strategically. Against TypeMatchupPlayer (which switches aggressively), WR has
+   DECLINED from 62% → 44% over 170K steps.
+3. **Temperature stuck at equilibrium:** SoftmaxDmg temp oscillates 0.88–1.05
+   since step 80K. At 54% WR, the formula gives target_temp=0.99. The system is
+   self-stabilizing at the agent's current skill — opponents never get harder.
+
+### Specific numbers
+
+| Metric | Step 59K (post-unfreeze) | Step 287K (latest) | Change |
+|--------|--------------------------|---------------------|--------|
+| Win rate | 52% | 54% | +2pp (noise) |
+| BestMv% | 58.3% | 57.6% | -0.7pp |
+| ExplVar | +0.074 | +0.103 | +0.03 (noise) |
+| Vol.Sw% | 0.3% | 0.7% | +0.4pp |
+| Temp | 0.92 | 0.95 | +0.03 |
+| TypeMatch WR | 42% | 44% | -18pp from peak (62%) |
+| MaxDmg WR | 43% | 57% | oscillating |
+| SoftmaxDmg WR | 67% | 67% | flat |
+| SelfPlay WR | 58% | 49% | oscillating ~50% |
+
+### What changed vs last working state?
+
+No previous run achieved sustained improvement. Run 043 (the best historical run)
+also plateaued at ~50% WR with positive ExplVar. Run 052 is marginally better
+(54% vs 50%) but the pattern is identical: value function works, policy doesn't
+improve.
+
+### Top 3 Hypotheses
+
+**H1: Agent is at the skill ceiling for a non-switching policy**
+
+The BC warm-start taught the agent MaxDamagePlayer behavior. MaxDamagePlayer
+itself wins ~50% against a mixed pool. The agent is at 54% — only slightly above
+this baseline. Without switching, it cannot:
+- Escape bad type matchups (TypeMatch WR declining)
+- Preserve low-HP Pokemon for later
+- Counter opponent switches
+
+*Confirming evidence:* Vol.Sw% = 0.7%, TypeMatch WR declining from 62%→44%
+*Disconfirming evidence:* MaxDmg WR = 50-57% suggests some improvement over pure MaxDamage
+*Experiment:* Benchmark MaxDamagePlayer against the same mixed_league pool for
+100 battles. If MaxDmg WR ≈ 50-54%, the agent has hit the non-switching ceiling.
+
+**H2: ExplVar ~0.12 is too low for PPO to make progress**
+
+ExplVar 0.12 means advantage estimates are ~88% noise. PPO's policy gradient
+needs at least moderately accurate advantages to identify which actions are
+better. With this noise level, the gradient signal from "switch was good here"
+is overwhelmed by random variance.
+
+*Confirming evidence:* ExplVar 0.12 across 228K steps; no WR improvement
+*Disconfirming evidence:* Run 043 had ExplVar 0.26 and also no improvement
+*Experiment:* Check if ExplVar is improving at all. If it's been flat at 0.12
+for 200K+ steps, the value function itself has plateaued.
+
+**H3: Temperature equilibrium trap prevents difficulty escalation**
+
+The temp formula `2.0*(1-wr) + 0.1*wr` with rate limiting creates a stable
+equilibrium. At 54% WR → target temp ≈ 1.0. SoftmaxDmg at temp 1.0 is
+effectively near-MaxDamage. All 4 opponents are now near their hardest setting,
+leaving no "easy" games for clean learning signal.
+
+*Confirming evidence:* Temp stuck at 0.88-1.05 for 200K steps. SoftmaxDmg WR
+dropped from 78% (temp 2.0) to 67% (temp 1.0).
+*Disconfirming evidence:* MaxDmg and SelfPlay are fixed-difficulty. If the agent
+can't improve against fixed opponents, temperature isn't the issue.
+*Experiment:* Not needed as standalone — MaxDmg WR (fixed difficulty) is also
+flat at ~54%, confirming the bottleneck is the agent, not opponent difficulty.
+
+### Assessment
+
+H1 is the most likely primary bottleneck. The agent is functionally a
+MaxDamagePlayer with slightly degraded move selection. PPO cannot discover
+switching from this foundation because:
+- Switching gives 0.0 immediate reward; benefit is 3-10 turns delayed
+- BC bias against switching (action_net.bias[:6] halved but still negative)
+- ent_coef=0.01 is insufficient to force random switching exploration
+- ExplVar=0.12 means even if the agent accidentally switched well once, the
+  noisy advantage estimate wouldn't reinforce it
+
+H2 and H3 are secondary contributors but not the root cause. Even with perfect
+ExplVar and easy opponents, a policy that never switches will plateau.
+
+---
+
+## Phase 2: Benchmark Experiments (2026-04-04)
+
+### Experiment: Benchmark agents vs league opponents (100 battles each)
+
+| Agent | vs MaxDmg | vs TypeMatch | vs SoftmaxDmg(t=1.0) | Overall |
+|-------|-----------|--------------|----------------------|---------|
+| MaxDamagePlayer | 41.0% | 47.9% | 65.7% | **51.5%** |
+| TypeMatchupPlayer | 51.0% | 46.4% | 55.6% | **51.0%** |
+| **Run 052 best model** | **55.6%** | **54.5%** | **64.6%** | **58.2%** |
+
+### Key Finding: H1 (Non-Switching Ceiling) REFUTED
+
+TypeMatchupPlayer, which switches aggressively for type advantage, gets only
+51.0% overall — WORSE than our non-switching model at 58.2%. Switching alone
+does not help. In fact, aggressive switching HURTS against damage-focused
+opponents (TypeMatch gets 55.6% vs SoftmaxDmg, our model gets 64.6%).
+
+### Key Finding: The Model IS Learning
+
+The run 052 model beats BOTH heuristic baselines by 6.7–7.2pp. PPO training
+DID improve the policy beyond the BC warm-start. The model's edge is primarily
+in move selection against damage-focused opponents (55.6% vs MaxDmg, vs MaxDmg's
+own 41.0% mirror match).
+
+### Key Finding: Training WR vs Benchmark WR Discrepancy
+
+Training WR (~54%) is lower than benchmark WR (58.2%) because training includes
+SelfPlay (~50%, mirror match by definition). The actual heuristic-pool WR is ~58%.
+
+### Revised Assessment
+
+**Primary bottleneck: ExplVar ≈ 0.12 limits fine-grained policy improvement.**
+
+The model learned the "big" things (basic move selection) quickly after
+unfreezing. But the remaining improvements (optimal move choice in edge cases,
+strategic switching, status move usage) require precise advantage estimates that
+ExplVar=0.12 cannot provide. The value function is positive but explains only
+12% of return variance, leaving 88% as noise in the policy gradient.
+
+**Secondary: Temperature equilibrium is a symptom, not a cause.** The agent's
+54% training WR locks temperature at ~1.0. But SoftmaxDmg isn't the bottleneck
+opponent — it's the easiest at 64.6% WR.
+
+**Switching is NOT the priority.** TypeMatch proves switching without good
+judgment is counterproductive. The agent needs better value estimates first,
+then can learn WHEN to switch (not just that switching exists).
+
+### Committed Approach
+
+**Improve value function quality (target ExplVar > 0.3) to unlock the next
+phase of policy learning.** The model has shown it CAN learn when advantages
+are moderately accurate (early post-unfreeze gains). The fix is to give it
+better advantages, not to force new behaviors directly.

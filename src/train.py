@@ -51,14 +51,15 @@ N_ENVS = 4
 PPO_KWARGS = dict(
     policy="MlpPolicy",
     policy_kwargs=dict(net_arch=dict(pi=[256, 128], vf=[256, 128])),
-    n_steps=2048,
+    n_steps=4096,  # Was 2048 — larger rollout buffer reduces per-rollout overfitting, improves GAE
     batch_size=128,
-    n_epochs=3,  # Was 10 — n_epochs=10 overfits value fn per rollout, destroying warmstart
+    n_epochs=4,  # Was 3 (was 10 before that). Safe with 2x larger rollout buffer (16384 samples)
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.1,  # Was 0.2 — conservative to preserve BC knowledge (run 043 lesson)
     max_grad_norm=0.5,
     ent_coef=0.01,
+    vf_coef=1.0,  # Was 0.5 (default) — double value loss weight to improve ExplVar
     learning_rate=1e-4,  # Was 3e-4→1e-4 schedule — constant 1e-4 worked in run 043
     verbose=1,
 )
