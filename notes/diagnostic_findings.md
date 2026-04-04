@@ -449,3 +449,85 @@ then can learn WHEN to switch (not just that switching exists).
 phase of policy learning.** The model has shown it CAN learn when advantages
 are moderately accurate (early post-unfreeze gains). The fix is to give it
 better advantages, not to force new behaviors directly.
+
+---
+
+## 2026-04-04 — Run 054 Post-Mortem: Config Tuning Failed
+
+Run 054 (n_steps=4096, n_epochs=4, vf_coef=1.0) killed at 177K steps. Compared
+with run 052 at same step count: ExplVar 0.078 vs 0.175 (WORSE), BestMv% 58.7%
+vs 57.3% (better BC preservation), WR 52% vs 53% (same), Temp 0.97 vs 0.97
+(same). The config changes improved BC stability but had zero effect on the
+ExplVar ceiling. Confirms anti-pattern: config-only fixes don't solve structural
+problems.
+
+---
+
+## 2026-04-04 — ExplVar Ceiling Experiment: Returns Are Unpredictable
+
+### Experiment Design
+Collected 9515 (observation, discounted_return) pairs from run 054 model
+playing 300 games (100 each vs MaxDmg, TypeMatch, SoftmaxDmg). Trained
+offline regressors with 5-fold cross-validation to measure the maximum
+achievable ExplVar given the current observation space.
+
+### Results
+
+| Model | Params | CV R² |
+|-------|--------|-------|
+| Mean predictor | 0 | -0.06 |
+| Ridge (alpha=1.0) | 1559 | -2.28 |
+| Tiny MLP [16] | ~25K | -1.19 |
+| Small MLP [32,16] | ~51K | -0.56 |
+| Large MLP [256,128] | ~432K | -0.33 |
+| 3 simple features (HP, alive counts) | 3 | -0.04 |
+
+**EVERY model performs WORSE than predicting the mean.** Even a regularized
+linear model with only 3 features (own HP, own alive, opp alive) cannot
+predict returns from observations.
+
+### Root Cause: Returns Are Structurally Unpredictable
+
+Three factors combine to make returns unpredictable from per-step observations:
+
+1. **gamma=0.99 spreads returns across the entire game.** At step 1, the return
+   includes rewards from step 30. The observation at step 1 cannot predict what
+   happens at step 30 (crits, misses, opponent's hidden team revealed).
+
+2. **matchup_baseline removes the most predictable signal.** Team quality
+   (which IS observable via types/stats) is explicitly subtracted from terminal
+   reward. The remaining variance is pure game-play uncertainty.
+
+3. **Partial observability.** Opponent's unrevealed Pokemon (1-5 hidden) have
+   massive impact on returns but aren't in the observation.
+
+### Implication: PPO's ExplVar=0.12 Is Likely Overfitting
+
+If the true ExplVar ceiling is ≤0 (offline CV proves this), then PPO's
+reported ExplVar=0.12 is in-sample memorization of the current rollout, not
+real predictive ability. Advantages computed from this V(s) are essentially
+random noise with a bias.
+
+### Why PPO Cannot Learn
+
+1. V(s) predicts noise → advantages = random
+2. Random advantages → random policy gradient direction
+3. BC knowledge erodes from random updates
+4. No improvement possible regardless of training duration/config
+
+This is NOT a training problem. It's a problem formulation problem.
+
+### Proposed Fix: Lower Gamma
+
+With gamma=0.99, effective horizon = 100 steps (entire game).
+With gamma=0.95, effective horizon = 20 steps (next few events).
+With gamma=0.90, effective horizon = 10 steps.
+
+Shorter gamma makes returns depend on NEAR-FUTURE events (next faint, next
+few turns), which ARE observable from current state. The value function can
+predict "opponent active is at 10% HP → faint incoming → positive near-term
+return." It CANNOT predict "will we win in 30 turns against hidden Tauros."
+
+Trade-off: agent becomes more myopic. Won't sacrifice now for benefit 20+
+turns later. But currently it can't learn ANYTHING. Better to learn short-term
+tactics well than to attempt long-horizon planning with zero learning signal.
