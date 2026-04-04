@@ -146,7 +146,9 @@ def main(new_run: bool = False) -> None:
 
     for phase in CURRICULUM:
         # Skip phases that were already completed in a previous session
-        if progress.get("phase") and progress["phase"] > phase["name"]:
+        # Compare only curriculum phase names (not "warmup" which is a sub-phase)
+        saved_phase = progress.get("phase", "")
+        if saved_phase and saved_phase != "warmup" and saved_phase > phase["name"]:
             print(f"  Phase {phase['name']} already completed — skipping")
             continue
         replay_dir = run.replays_dir(f"phase_{phase['name'].lower()}")
