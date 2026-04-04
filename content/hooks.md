@@ -575,3 +575,40 @@ Three config changes, zero code changes:
 Target: ExplVar > 0.20 → unlock the next phase of learning.
 
 **Why it's great content:** The audience sees a counterintuitive result — the agent WAS learning, it WAS the best player, but it couldn't IMPROVE because its self-evaluation (value function) was too noisy to know what was working. Like a student who can pass every test but can't study effectively because they can't tell which answers they got right.
+
+### Plot Twist: The Config Fix Failed Too
+**Hook:** "We doubled the value learning rate. Doubled the buffer size. Added an extra training epoch. Then ran for 160K steps. ExplVar didn't move."
+
+Run 054 applied three config changes aimed at improving value function quality. All three had zero effect on ExplVar (still 0.12). The one thing that DID improve was BC preservation (BestMv% erosion slowed 3x). But the core problem — the value function can't learn — remained untouched.
+
+**Visual:** Split screen: left shows "Changes Made" (bigger buffer, more epochs, double vf weight). Right shows ExplVar chart — flat line at 0.12 before and after. The caption: "When tuning hyperparameters doesn't work, the problem isn't the hyperparameters."
+
+### The Experiment That Explained Everything
+**Hook:** "We asked a simple question: if you gave a perfect neural network unlimited training time on our game data, could it predict who's going to win? The answer was NO."
+
+Collected 9,515 observations from 300 real games. Trained offline models (linear regression, small MLP, large MLP) with 5-fold cross-validation. Every single one scored NEGATIVE R² — worse than just predicting the average.
+
+| Model | CV R² |
+|-------|-------|
+| Linear regression | -2.28 |
+| Large neural network | -0.33 |
+| Just predict the average | -0.06 |
+
+The observations literally contain zero predictive signal about game outcomes. The value function that PPO was training against these targets was learning noise.
+
+**Visual:** Bar chart of R² scores all below zero. The "predict average" bar is the best performer. The neural network — the same architecture PPO uses — is the worst.
+
+**Why it's great content:** This is a genuinely surprising scientific result. The audience learns that ML isn't just "train harder" — sometimes the PROBLEM FORMULATION makes learning impossible. No amount of GPU time fixes a problem that's mathematically impossible.
+
+### The Root Cause: Looking Too Far Ahead
+**Hook:** "gamma=0.99 means the agent tries to predict the entire game from a single snapshot. That's like predicting who wins the World Cup from a single frame of the first match."
+
+With gamma=0.99, the return at turn 1 includes discounted rewards from turn 30. The agent can't see the opponent's hidden team. Can't predict random crits. Can't know if the opponent has a Tauros waiting in the back. The observation is a keyhole view into a 30-turn war of attrition.
+
+With gamma=0.95, the agent only looks 20 turns ahead. Now it CAN predict near-future events: "opponent at 10% HP → faint incoming → positive return." This IS in the observation.
+
+**The fix:** One number changed. `gamma = 0.95`. Mini-experiment: ExplVar went from impossible (negative R²) to +0.133 in 50K steps — WITHOUT the frozen-actor warmup that previous runs needed.
+
+**Visual:** Side by side: "gamma=0.99: trying to predict 100 turns ahead" (blurry crystal ball) vs "gamma=0.95: predicting 20 turns ahead" (clear view). The ExplVar trajectory climbing from -0.5 to +0.13.
+
+**Why it's great content:** The audience learns that the most impactful changes in ML are often not about architecture or training tricks — they're about making the problem SOLVABLE. The gamma change doesn't make the model smarter. It makes the QUESTION the model is trying to answer answerable.
