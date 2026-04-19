@@ -120,11 +120,15 @@ When work is complete (code changes pass tests), ALWAYS follow this sequence wit
 3. **Push**: `git push -u origin <branch>`
 4. **PR**: `gh pr create --title "..." --body "$(cat <<'EOF' ... EOF)"` — include a Summary section and Test plan. No AI attribution.
 5. **Wait for CodeRabbit**: `gh pr checks <N>` until CodeRabbit shows pass. Read inline comments with `gh api repos/theochavannes/pokemon-rl/pulls/<N>/comments`.
-6. **Address feedback**: Fix valid issues, commit, push. Ignore pure nitpicks on docs/notes files.
-7. **Merge**: `gh pr merge <N> --merge --delete-branch`
+6. **Address feedback**: Fix all valid issues from one CodeRabbit review round in a **single commit** titled `Address CodeRabbit feedback on PR #<N>` before pushing. This cuts re-review quota burn and matches open-source convention. Ignore pure nitpicks on docs/notes files.
+7. **Merge**: `gh pr merge <N> --squash --delete-branch`. Squash collapses the PR's commits into one clean commit on master. Full per-commit history remains visible in the closed PR on GitHub. Granular local commits become free — commit as often as you want while working, it all collapses at merge.
 8. **Sync**: `git checkout master && git pull`
 
 This is not optional. Every task that changes tracked files ends with a merged PR on master.
+
+**Note on content-only PRs**: When updating `content/hooks.md` or `content/team_decisions.md` to document a decision made in a code PR, prefer bundling the content update into that same PR rather than opening a follow-up PR. This lands the doc with the code it describes (better traceability) and saves a CodeRabbit review cycle. Standalone content-only PRs are fine when the content isn't tied to a specific code change.
+
+**CodeRabbit config**: `.coderabbit.yaml` at repo root excludes `content/`, `notes/`, `showdown/`, `runs/`, `data/`, and root-level planning `*.md` from review to preserve quota for code.
 
 ## Gen 1 Mechanics to Be Aware Of
 
