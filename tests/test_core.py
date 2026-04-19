@@ -854,11 +854,13 @@ class TestRoleFeatures:
         """roles_for normalizes hyphens, spaces, periods, apostrophes, and case."""
         from src.tier_baseline import roles_for
 
-        # Display-name variants should resolve to the same vector as the canonical key.
+        # Mr. Mime has a non-zero role entry; display-name variants must hit it.
         canonical = roles_for("mrmime")
+        assert sum(canonical) > 0, "mrmime must have roles for this test to be meaningful"
         assert roles_for("Mr. Mime") == canonical
         assert roles_for("MR-MIME") == canonical
-        assert roles_for("Farfetch'd") == roles_for("farfetchd")
+        assert roles_for("mr.mime") == canonical
+        assert roles_for("Mr'Mime") == canonical  # apostrophe normalization
 
     def test_role_block_dims(self):
         """Obs should end with 168 role dims (14 slots × 12 roles)."""
