@@ -30,6 +30,7 @@ wandb/
 # Legacy top-level dirs (kept for backwards compat, new runs go to runs/)
 logs/
 models/
+!models/best_model_v1.zip
 
 # Run outputs — ignore everything (metadata not worth tracking)
 runs/
