@@ -40,7 +40,7 @@ Reinforcement learning agent for competitive Gen 1 (RBY) Pokemon battles using P
 ## Tech Stack
 
 - **Game server**: Pokemon Showdown (Node.js/TypeScript) in `showdown/`
-- **Python env**: `C:/Users/theoc/miniconda3/envs/pokemon_rl/python.exe` (Python 3.11)
+- **Python env**: Python 3.11 (conda recommended: `conda create -n pokemon_rl python=3.11`)
 - **Key Python libs**: poke-env 0.13.0, stable-baselines3 + sb3-contrib (MaskablePPO), PyTorch CUDA 12.0
 - **Battle format**: `gen1randombattle` throughout
 
@@ -99,7 +99,7 @@ runs/              # Training runs (gitignored except logs)
 PLAN.md            # 6-phase implementation roadmap
 ```
 
-The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 1559-dim float32 observation space, shaped rewards (fainted=0.5, victory=1.0), and action masking. All Pokemon are forced to level 100 in Showdown for training consistency.
+The Python side uses poke-env to connect to the local Showdown WebSocket server. poke-env exposes a Gymnasium-compatible interface; `src/env/gen1_env.py` wraps it with a 1739-dim float32 observation space, shaped rewards (fainted=0.5, victory=1.0), and action masking. All Pokemon are forced to level 100 in Showdown for training consistency.
 
 ## Observation Space Changes — IMPORTANT
 
@@ -119,7 +119,7 @@ When work is complete (code changes pass tests), ALWAYS follow this sequence wit
 2. **Commit**: Stage relevant files with focused commits. Use `git commit -m "$(cat <<'EOF' ... EOF)"` for multi-line messages. Never use `--no-verify`.
 3. **Push**: `git push -u origin <branch>`
 4. **PR**: `gh pr create --title "..." --body "$(cat <<'EOF' ... EOF)"` — include a Summary section and Test plan. No AI attribution.
-5. **Wait for CodeRabbit**: `gh pr checks <N>` until CodeRabbit shows pass. Read inline comments with `gh api repos/theochavannes/pokemon-rl/pulls/<N>/comments`.
+5. **Wait for CodeRabbit**: `gh pr checks <N>` until CodeRabbit shows pass. Read inline comments with `gh api repos/<owner>/<repo>/pulls/<N>/comments`.
 6. **Address feedback**: Fix all valid issues from one CodeRabbit review round in a **single commit** titled `Address CodeRabbit feedback on PR #<N>` before pushing. This cuts re-review quota burn and matches open-source convention. Ignore pure nitpicks on docs/notes files.
 7. **Merge**: `gh pr merge <N> --squash --delete-branch`. Squash collapses the PR's commits into one clean commit on master. Full per-commit history remains visible in the closed PR on GitHub. Granular local commits become free — commit as often as you want while working, it all collapses at merge.
 8. **Sync**: `git checkout master && git pull`
