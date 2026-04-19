@@ -897,9 +897,10 @@ class TestRoleFeatures:
         ko_block = obs[-12:]
         assert ko_block.shape == (12,)
         # With default mocks (BP 80, 2× effective, both mons full HP) every move has
-        # nonzero expected damage fraction.
+        # nonzero expected damage fraction — and all KO features respect Box(-1, 1).
         exp_fracs = ko_block[::3]
         assert (exp_fracs > 0).all(), f"Expected nonzero expected_dmg_fraction, got {exp_fracs}"
+        assert (ko_block >= 0).all() and (ko_block <= 1.0).all(), f"KO block out of [0,1]: {ko_block}"
 
     def test_ko_features_prob_ko_scales_with_opp_hp(self):
         """prob_ko should be higher when the opponent is near death than when full-HP."""

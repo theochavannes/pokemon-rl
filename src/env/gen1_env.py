@@ -358,8 +358,8 @@ def _ko_features(move, attacker, defender) -> list:
     Return 3 floats per move:
       [expected_dmg_fraction, prob_ko, recharge_trap]
 
-    - expected_dmg_fraction: E[damage] / defender_current_hp, clamped [0, 1.5]
-                             folds accuracy in (so miss reduces expectation)
+    - expected_dmg_fraction: E[damage] / defender_current_hp, saturated to [0, 1.0]
+                             (respects Box(-1, 1) obs bounds); folds accuracy in
     - prob_ko: P(damage >= defender_current_hp) over Gen 1 (217..255)/255 rolls,
                multiplied by accuracy (unconditional hit+KO probability)
     - recharge_trap: must_recharge × (1 - prob_ko) — "this click commits me to a
@@ -445,8 +445,10 @@ def _ko_features(move, attacker, defender) -> list:
         min_dmg = base * mod * (217 / 255)
         max_dmg = base * mod
 
-    # Expected damage fraction (folding accuracy in; clamp high values)
-    exp_frac = min(mean_dmg * acc / cur_hp, 1.5)
+    # Expected damage fraction (folding accuracy in; saturate at 1.0 to respect Box(-1, 1)).
+    # Above 1.0 is semantically "overkill" — `prob_ko` already encodes that, so we
+    # don't need extra headroom here.
+    exp_frac = min(mean_dmg * acc / cur_hp, 1.0)
 
     # Prob KO given hit, then scaled by accuracy
     if min_dmg >= cur_hp:
