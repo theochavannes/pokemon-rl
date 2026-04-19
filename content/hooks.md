@@ -626,3 +626,17 @@ In gen1randombattle, teams are assigned randomly from 146 species. Sometimes you
 **Visual:** Side-by-side team lists. Before: Magikarp vs Tauros — red "unwinnable" stamp. After: Tauros vs Snorlax — green "skill match" stamp. A histogram of final-state value predictions: wider before filtering (can't tell good from bad), tighter after.
 
 **Why it's great content:** Classic ML lesson. When a model plateaus, don't train harder — check whether the problem is even solvable at the data you're giving it. The distribution of outcomes has to contain learnable structure. We spent weeks on value function architecture when the real issue was that 25% of our training data was pure noise.
+
+---
+
+## Telling the Agent What Each Pokemon IS
+
+**Hook:** "Our agent can see Chansey's HP, stats, and moves — but doesn't know Chansey is a *wall*. What if we just told it?"
+
+Each Gen 1 OU Pokemon has a competitive archetype: sweeper, wall, status spreader, revenge killer. Human players reason at this level immediately — "don't bring Alakazam in on Chansey, it can't break through; don't send Tauros against Golem, the rock type walls him." The agent has to learn all of that from scratch, slot by slot, by correlating noisy battle outcomes to feature combinations.
+
+**The fix:** A 12-dimensional role vector per Pokemon slot. Chansey lights up bits 4 (Special Wall), 5 (Status Spreader), 7 (Pivot), 11 (Utility). Tauros lights up 0 (Physical Sweeper) and 6 (Revenge Killer). The agent gets to see roles explicitly, and the value function no longer has to infer them from stat patterns.
+
+**Visual:** Two side-by-side Pokemon cards. Left: Chansey with a blank "role" field. Right: Chansey with glowing tags [WALL], [STATUS], [PIVOT], [UTILITY]. Then the same for Tauros. The observation vector literally grew from 1559 numbers to 1727 — and 168 of the new numbers are "what kind of Pokemon is this?"
+
+**Why it's great content:** This connects to how humans think about the game. The feature engineering narrative — "we spent all this time building a two-tower network and attention mechanisms, and then we discovered we could just *tell the agent what Pokemon are*" — is a great counterweight to "more architecture = better."

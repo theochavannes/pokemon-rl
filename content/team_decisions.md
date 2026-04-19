@@ -888,3 +888,19 @@ at gamma=0.99 remains the best achievable with current setup.
 **Why this should help:** Panel hypothesis — removing unwinnable matchups reduces terminal-reward variance, so the value function can learn. Matchup baseline (`matchup_baseline`) already corrects for the remaining variance in a smaller pool; with fewer species and tighter tier distribution, its residual error shrinks further.
 
 **Trade-off considered:** Fixed-team curriculum (panel idea #5) was the more aggressive alternative — deferred because OU-only filtering is a strictly smaller change and addresses ~70% of the same variance. If OU-only fails to break the 60% ceiling, fixed-team is the next lever.
+
+---
+
+## 2026-04-19 — Role Features (obs 1559 → 1727)
+
+**Context:** Companion change to OU-only pool filtering. With 39 species in play, each one has a distinct strategic archetype the agent should reason about (Chansey is a wall, Tauros is a revenge killer). Raw base stats don't capture "Chansey stalls Toxic damage into Soft-Boiled" or "Exeggutor leads with Sleep Powder" — those are emergent from the move set plus speed/bulk interactions, not any one stat.
+
+**Decision:** Append a 12-dim multi-label binary role vector per Pokemon slot (14 slots: own active + 6 own bench + opp active + 6 opp bench) = 168 new dims. Obs grows 1559 → 1727. The 12 roles: Physical Sweeper, Special Sweeper, Mixed Attacker, Physical Wall, Special Wall, Status Spreader, Revenge Killer, Pivot, Setup Sweeper, Trapper, Tank, Utility.
+
+**Multi-label, not one-hot:** Snorlax is simultaneously a Tank, Setup Sweeper, and Physical Sweeper. Chansey is a Special Wall AND Status Spreader AND Pivot AND Utility. One-hot would lose that — most of these mons genuinely have overlapping roles in OU.
+
+**Unrevealed opponent bench:** all zeros (consistent with "unknown"). Same convention as other "unknown" features in the obs.
+
+**BC retrain required:** Role features are appended at the end of the obs (compatible with `obs_transfer.py` zero-padding), but since we're also changing the species pool in the same cycle, the simplest path is full BC retraining instead of a transfer-learning warm-start.
+
+**Why this should help:** Panel hypothesis — the value function currently has to infer role implicitly from (stat block + revealed moves). That's noisy, especially for the opponent whose moves are only partially revealed. Giving it role directly is a strong prior, like labelling the positions on a chess board instead of making the network infer piece identity from location.

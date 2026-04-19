@@ -63,6 +63,7 @@ def _mock_pokemon(
     level=100,
     base_stats=None,
     moves=None,
+    species="unknown",
 ):
     """Create a mock Pokemon object."""
     mon = MagicMock()
@@ -71,6 +72,7 @@ def _mock_pokemon(
     mon.status = status
     mon.boosts = boosts or {"atk": 0, "def": 0, "spe": 0, "spa": 0, "accuracy": 0, "evasion": 0}
     mon.level = level
+    mon.species = species
 
     if type1_value:
         mon.type_1 = MagicMock()
@@ -135,7 +137,7 @@ class TestEmbedBattle:
 
         battle = _mock_battle()
         obs = embed_battle(battle)
-        assert obs.shape == (1559,), f"Expected (1559,), got {obs.shape}"
+        assert obs.shape == (1727,), f"Expected (1727,), got {obs.shape}"
 
     def test_output_dtype(self):
         from src.env.gen1_env import embed_battle
@@ -163,9 +165,10 @@ class TestEmbedBattle:
 
         battle = _mock_battle(trapped=True, maybe_trapped=True)
         obs = embed_battle(battle)
-        # Trapping flags at -16 and -15 (before speed, alive, volatile, status, toxic, turn)
-        assert obs[-16] == 1.0, "trapped flag should be 1.0"
-        assert obs[-15] == 1.0, "maybe_trapped flag should be 1.0"
+        # Trapping flags at absolute indices 1543 and 1544
+        # (before speed, alive, volatile, status, toxic, turn, roles)
+        assert obs[1543] == 1.0, "trapped flag should be 1.0"
+        assert obs[1544] == 1.0, "maybe_trapped flag should be 1.0"
 
     def test_empty_opp_bench_padding(self):
         from src.env.gen1_env import embed_battle
@@ -200,7 +203,7 @@ class TestEmbedBattle:
             for opp_size in [0, 2, 6]:
                 battle = _mock_battle(team_size=team_size, opp_team_size=opp_size)
                 obs = embed_battle(battle)
-                assert obs.shape == (1559,)
+                assert obs.shape == (1727,)
                 assert np.all(np.isfinite(obs))
 
 
@@ -508,18 +511,18 @@ class TestIntegrationSmoke:
 
         # Normal battle
         obs = embed_battle(_mock_battle())
-        assert obs.shape == (1559,)
+        assert obs.shape == (1727,)
 
         # Minimal teams
         obs = embed_battle(_mock_battle(team_size=1, opp_team_size=1))
-        assert obs.shape == (1559,)
+        assert obs.shape == (1727,)
 
         # Fainted active (edge case)
         battle = _mock_battle()
         battle.active_pokemon.fainted = True
         battle.active_pokemon.current_hp_fraction = 0.0
         obs = embed_battle(battle)
-        assert obs.shape == (1559,)
+        assert obs.shape == (1727,)
         assert obs[0] == 0.0  # HP should be 0
 
     def test_move_features_accuracy_variants(self):
@@ -807,14 +810,92 @@ class TestSprint5Features:
         battle.side_conditions = {SideCondition.REFLECT: 1}
 
         obs = embed_battle(battle)
-        # Volatile status starts at -12 from end (8 volatile + 1 opp_status + 1 toxic = 10 from end, but before that is alive(2))
-        # Actually: end = trapping(2) + speed(1) + alive(2) + volatile(8) + status_threat(1) + toxic(1) = 15
-        # volatile starts at -10 from end
-        # volatile starts at -11 from end (8 volatile + 1 status_threat + 1 toxic + 1 turn = 11)
-        assert obs[-11] == 1.0, "own_substitute should be 1.0"
-        assert obs[-10] == 0.0, "opp_substitute should be 0.0"
-        assert obs[-9] == 1.0, "own_reflect should be 1.0"
-        assert obs[-8] == 0.0, "own_light_screen should be 0.0"
+        # Volatile status starts at absolute index 1548
+        # (after trapping(2) + speed(1) + alive(2) starting from 1543)
+        assert obs[1548] == 1.0, "own_substitute should be 1.0"
+        assert obs[1549] == 0.0, "opp_substitute should be 0.0"
+        assert obs[1550] == 1.0, "own_reflect should be 1.0"
+        assert obs[1551] == 0.0, "own_light_screen should be 0.0"
+
+
+# ---------------------------------------------------------------------------
+# Role features (12-dim multi-label per Pokemon slot)
+# ---------------------------------------------------------------------------
+
+
+class TestRoleFeatures:
+    def test_tauros_roles(self):
+        """Tauros: physical sweeper + revenge killer (indices 0 and 6)."""
+        from src.tier_baseline import roles_for
+
+        vec = roles_for("tauros")
+        assert len(vec) == 12
+        assert vec[0] == 1, "Tauros should be Physical Sweeper (index 0)"
+        assert vec[6] == 1, "Tauros should be Revenge Killer (index 6)"
+        assert sum(vec) == 2, "Tauros should have exactly 2 roles set"
+
+    def test_chansey_roles(self):
+        """Chansey: special wall + status + utility + pivot."""
+        from src.tier_baseline import roles_for
+
+        vec = roles_for("chansey")
+        assert vec[4] == 1, "Chansey should be Special Wall"
+        assert vec[5] == 1, "Chansey should be Status Spreader"
+        assert vec[7] == 1, "Chansey should be Pivot"
+        assert vec[11] == 1, "Chansey should be Utility"
+
+    def test_unknown_species_zeros(self):
+        """Unknown species returns all zeros."""
+        from src.tier_baseline import roles_for
+
+        assert sum(roles_for("nonexistent_mon")) == 0
+
+    def test_display_name_normalization(self):
+        """roles_for normalizes hyphens, spaces, periods, apostrophes, and case."""
+        from src.tier_baseline import roles_for
+
+        # Mr. Mime has a non-zero role entry; display-name variants must hit it.
+        canonical = roles_for("mrmime")
+        assert sum(canonical) > 0, "mrmime must have roles for this test to be meaningful"
+        assert roles_for("Mr. Mime") == canonical
+        assert roles_for("MR-MIME") == canonical
+        assert roles_for("mr.mime") == canonical
+        assert roles_for("Mr'Mime") == canonical  # apostrophe normalization
+
+    def test_role_block_dims(self):
+        """Obs should end with 168 role dims (14 slots × 12 roles)."""
+        from src.env.gen1_env import embed_battle
+
+        battle = _mock_battle(team_size=6, opp_team_size=6)
+        battle.active_pokemon.species = "tauros"
+        battle.opponent_active_pokemon.species = "chansey"
+        obs = embed_battle(battle)
+
+        # Role block occupies indices 1559..1727
+        roles_start = 1559
+        # Own active roles: first 12 of the role block
+        own_active_roles = obs[roles_start : roles_start + 12]
+        assert own_active_roles[0] == 1.0, "Own Tauros active → Physical Sweeper"
+        assert own_active_roles[6] == 1.0, "Own Tauros active → Revenge Killer"
+
+        # Opp active roles: after own_active (12) + own_bench (6*12=72)
+        opp_active_start = roles_start + 12 + 72
+        opp_active_roles = obs[opp_active_start : opp_active_start + 12]
+        assert opp_active_roles[4] == 1.0, "Opp Chansey active → Special Wall"
+        assert opp_active_roles[11] == 1.0, "Opp Chansey active → Utility"
+
+    def test_unrevealed_opp_bench_zero_roles(self):
+        """Empty opp bench slots emit zero roles (consistent with 'unknown')."""
+        from src.env.gen1_env import embed_battle
+
+        battle = _mock_battle(team_size=6, opp_team_size=0)
+        obs = embed_battle(battle)
+        # Opp bench roles begin at 1559 + 12 + 72 + 12 = 1655
+        opp_bench_start = 1655
+        for slot in range(6):
+            for r in range(12):
+                idx = opp_bench_start + slot * 12 + r
+                assert obs[idx] == 0.0, f"Empty opp bench slot {slot} role {r} should be 0.0"
 
 
 # ---------------------------------------------------------------------------
