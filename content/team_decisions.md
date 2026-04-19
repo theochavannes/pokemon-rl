@@ -874,3 +874,17 @@ Future experiments must match the actual training pipeline.
 ### Decision
 Gamma reverted to 0.99. selfplay_train.py also reverted. The ExplVar ≈ 0.12
 at gamma=0.99 remains the best achievable with current setup.
+
+---
+
+## 2026-04-19 — OU-Only Random Battle Pool
+
+**Context:** Agent plateaued at ~58% win rate in `gen1randombattle`. Expert panel root-caused the ceiling to random team assignment: Magikarp vs Tauros is unwinnable regardless of policy quality, adding pure noise the value function cannot learn from.
+
+**Decision:** Filter Showdown's gen1 random battle pool from 146 species down to 39 (tier >= 3 + Ditto). Mew/Mewtwo excluded as Ubers — they reintroduce the same imbalance in reverse.
+
+**Implementation:** `scripts/filter_ou_pool.py` reads `GEN1_TIER_RATINGS` and rewrites `showdown/data/random-battles/gen1/data.json`. Backs up the original as `data_full.json` for reversibility. `_DEFAULT_TIER` in `tier_baseline.py` bumped 2 → 3 since the remaining pool is near-uniformly OU. Added missing tier entries: `tentacool/krabby` = 1 (excluded), `mew/mewtwo` = 5 (excluded as Ubers).
+
+**Why this should help:** Panel hypothesis — removing unwinnable matchups reduces terminal-reward variance, so the value function can learn. Matchup baseline (`matchup_baseline`) already corrects for the remaining variance in a smaller pool; with fewer species and tighter tier distribution, its residual error shrinks further.
+
+**Trade-off considered:** Fixed-team curriculum (panel idea #5) was the more aggressive alternative — deferred because OU-only filtering is a strictly smaller change and addresses ~70% of the same variance. If OU-only fails to break the 60% ceiling, fixed-team is the next lever.

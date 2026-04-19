@@ -180,9 +180,14 @@ GEN1_TIER_RATINGS: dict[str, int] = {
     "dratini": 1,
     "dragonair": 1,
     "drowzee": 1,
+    "tentacool": 1,
+    "krabby": 1,
+    # --- Ubers: excluded from the random pool (filter_ou_pool.py) ---
+    "mew": 5,
+    "mewtwo": 5,
 }
 
-_DEFAULT_TIER = 2  # Unknown Pokemon assumed average
+_DEFAULT_TIER = 3  # With OU-only pool, unknown species should default near-OU
 
 
 def team_score(team: dict) -> float:

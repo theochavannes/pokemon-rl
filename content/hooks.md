@@ -612,3 +612,17 @@ With gamma=0.95, the agent only looks 20 turns ahead. Now it CAN predict near-fu
 **Visual:** Side by side: "gamma=0.99: trying to predict 100 turns ahead" (blurry crystal ball) vs "gamma=0.95: predicting 20 turns ahead" (clear view). The ExplVar trajectory climbing from -0.5 to +0.13.
 
 **Why it's great content:** The audience learns that the most impactful changes in ML are often not about architecture or training tricks — they're about making the problem SOLVABLE. The gamma change doesn't make the model smarter. It makes the QUESTION the model is trying to answer answerable.
+
+---
+
+## Breaking the 58% Ceiling: The Magikarp Problem
+
+**Hook:** "Our Pokemon RL agent got stuck at 58% win rate. We threw bigger networks, smarter opponents, and a curriculum at it. Then we realized the problem: the agent was being asked to win unwinnable games."
+
+In gen1randombattle, teams are assigned randomly from 146 species. Sometimes you get Tauros and Chansey and Snorlax. Sometimes you get Magikarp, Caterpie, and Weedle. No policy — human, bot, god — can win the bad matchups. The agent was accumulating terminal rewards that had nothing to do with its decisions.
+
+**The fix:** Remove 107 species from the pool. Keep only the 39 that are OU-viable (tiers 3+) plus Ditto. Now every battle is between two competent teams. Policy quality becomes the signal, not team luck.
+
+**Visual:** Side-by-side team lists. Before: Magikarp vs Tauros — red "unwinnable" stamp. After: Tauros vs Snorlax — green "skill match" stamp. A histogram of final-state value predictions: wider before filtering (can't tell good from bad), tighter after.
+
+**Why it's great content:** Classic ML lesson. When a model plateaus, don't train harder — check whether the problem is even solvable at the data you're giving it. The distribution of outcomes has to contain learnable structure. We spent weeks on value function architecture when the real issue was that 25% of our training data was pure noise.
