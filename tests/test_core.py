@@ -87,6 +87,10 @@ def _mock_pokemon(
         mon.type_2 = None
 
     mon.base_stats = base_stats or {"atk": 100, "def": 100, "spa": 100, "spe": 100}
+    # Computed stats (Gen 1, level 100, max DVs) — used by KO-probability features.
+    mon.stats = {k: v * 2 + 68 for k, v in mon.base_stats.items()}
+    mon.stats["hp"] = mon.base_stats.get("atk", 100) * 2 + 168  # HP stat ≈ base*2 + 168 at L100
+    mon.stats["spd"] = mon.stats.get("spa", 200)  # Gen 1: single Special stat
     mon.moves = {f"move{i}": m for i, m in enumerate(moves or [_mock_move() for _ in range(4)])}
     mon.effects = {}
     mon.status_counter = 0
@@ -137,7 +141,7 @@ class TestEmbedBattle:
 
         battle = _mock_battle()
         obs = embed_battle(battle)
-        assert obs.shape == (1727,), f"Expected (1727,), got {obs.shape}"
+        assert obs.shape == (1739,), f"Expected (1739,), got {obs.shape}"
 
     def test_output_dtype(self):
         from src.env.gen1_env import embed_battle
@@ -203,7 +207,7 @@ class TestEmbedBattle:
             for opp_size in [0, 2, 6]:
                 battle = _mock_battle(team_size=team_size, opp_team_size=opp_size)
                 obs = embed_battle(battle)
-                assert obs.shape == (1727,)
+                assert obs.shape == (1739,)
                 assert np.all(np.isfinite(obs))
 
 
@@ -511,18 +515,18 @@ class TestIntegrationSmoke:
 
         # Normal battle
         obs = embed_battle(_mock_battle())
-        assert obs.shape == (1727,)
+        assert obs.shape == (1739,)
 
         # Minimal teams
         obs = embed_battle(_mock_battle(team_size=1, opp_team_size=1))
-        assert obs.shape == (1727,)
+        assert obs.shape == (1739,)
 
         # Fainted active (edge case)
         battle = _mock_battle()
         battle.active_pokemon.fainted = True
         battle.active_pokemon.current_hp_fraction = 0.0
         obs = embed_battle(battle)
-        assert obs.shape == (1727,)
+        assert obs.shape == (1739,)
         assert obs[0] == 0.0  # HP should be 0
 
     def test_move_features_accuracy_variants(self):
@@ -883,6 +887,60 @@ class TestRoleFeatures:
         opp_active_roles = obs[opp_active_start : opp_active_start + 12]
         assert opp_active_roles[4] == 1.0, "Opp Chansey active → Special Wall"
         assert opp_active_roles[11] == 1.0, "Opp Chansey active → Utility"
+
+    def test_ko_block_position_and_size(self):
+        """KO-probability block is the last 12 dims of the obs (4 moves × 3 features)."""
+        from src.env.gen1_env import embed_battle
+
+        battle = _mock_battle(team_size=6, opp_team_size=6)
+        obs = embed_battle(battle)
+        ko_block = obs[-12:]
+        assert ko_block.shape == (12,)
+        # With default mocks (BP 80, 2× effective, both mons full HP) every move has
+        # nonzero expected damage fraction — and all KO features respect Box(-1, 1).
+        exp_fracs = ko_block[::3]
+        assert (exp_fracs > 0).all(), f"Expected nonzero expected_dmg_fraction, got {exp_fracs}"
+        assert (ko_block >= 0).all() and (ko_block <= 1.0).all(), f"KO block out of [0,1]: {ko_block}"
+
+    def test_ko_features_prob_ko_scales_with_opp_hp(self):
+        """prob_ko should be higher when the opponent is near death than when full-HP."""
+        from src.env.gen1_env import _ko_features
+
+        battle_full = _mock_battle(opp_hp=1.0)
+        battle_low = _mock_battle(opp_hp=0.1)
+        move = list(battle_full.active_pokemon.moves.values())[0]
+        attacker = battle_full.active_pokemon
+
+        full_feats = _ko_features(move, attacker, battle_full.opponent_active_pokemon)
+        low_feats = _ko_features(move, attacker, battle_low.opponent_active_pokemon)
+        # prob_ko at low HP should be >= prob_ko at full HP
+        assert low_feats[1] >= full_feats[1]
+        # Expected damage fraction should also be higher for a low-HP target
+        assert low_feats[0] >= full_feats[0]
+
+    def test_ko_features_status_move_returns_zero(self):
+        """Status moves (BP=0, category=STATUS) should return [0, 0, 0]."""
+        from poke_env.battle.move_category import MoveCategory
+
+        from src.env.gen1_env import _ko_features
+
+        battle = _mock_battle()
+        move = _mock_move(base_power=0)
+        move.category = MoveCategory.STATUS
+        feats = _ko_features(move, battle.active_pokemon, battle.opponent_active_pokemon)
+        assert feats == [0.0, 0.0, 0.0]
+
+    def test_ko_features_recharge_trap(self):
+        """Recharge-flagged move with non-KO damage yields nonzero recharge_trap."""
+        from src.env.gen1_env import _ko_features
+
+        battle = _mock_battle(opp_hp=1.0)  # full HP opponent
+        move = _mock_move(base_power=150, effectiveness=1.0)  # Hyper Beam-ish, neutral
+        move.flags = {"recharge": True}
+        feats = _ko_features(move, battle.active_pokemon, battle.opponent_active_pokemon)
+        # Should NOT KO a full-HP target with neutral damage, so recharge_trap > 0
+        assert feats[1] < 1.0, f"Shouldn't guarantee KO at full HP, got prob_ko={feats[1]}"
+        assert feats[2] > 0.0, f"Expected recharge_trap > 0, got {feats[2]}"
 
     def test_unrevealed_opp_bench_zero_roles(self):
         """Empty opp bench slots emit zero roles (consistent with 'unknown')."""

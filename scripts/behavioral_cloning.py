@@ -32,7 +32,7 @@ sys.path.insert(0, str(_ROOT))
 from src.env.gen1_env import make_env
 
 # Must match train.py PPO_KWARGS
-OBS_DIM = 1727
+OBS_DIM = 1739
 ACTION_DIM = 10
 
 

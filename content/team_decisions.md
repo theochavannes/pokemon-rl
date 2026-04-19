@@ -931,3 +931,88 @@ at gamma=0.99 remains the best achievable with current setup.
 - Small focused PRs remain the norm. Only content-only *documentation* PRs get folded into their parent code PR.
 
 **Rollback cost:** zero. Delete `.coderabbit.yaml`, revert CLAUDE.md edit, behavior returns to current state immediately.
+
+---
+
+## 2026-04-19 (evening) — Run 056 Resumed from Step 89K, Not 175K (Checkpoint Gap)
+
+**What happened:** Laptop battery died at step 175,588. On resume, `RunManager.latest_checkpoint()` loaded step 89,844 — an 85K-step gap.
+
+**Root cause:** `latest_checkpoint()` priority is "highest-step `ppo_pokemon_*_steps.zip` → `best_model.zip`". `CheckpointCallback(save_freq=50000)` apparently never fired again during the Phase-League window, so the only periodic checkpoint in the run dir was the ancient `ppo_pokemon_50000_steps.zip` from setup. Resume fell through to `best_model.zip`, which pointed to the 57% peak at step 89,840.
+
+**Silver lining:** The lost 85K steps were net-negative for the policy (57% peak → 48% sustained by 175K). Restarting from the peak and re-traversing those steps with the current temperature schedule may land in a better basin. We get a free ablation study out of the crash.
+
+**First eval after resume:**
+- Step 91,892 (50 eps, noisy): WR 32%, BestMv% 41%, temp 1.12.
+- WR 32% is startup transient (50-ep window); BestMv% being stable at 41% suggests weights loaded correctly.
+
+**Open issue to fix later:** `latest_checkpoint()` should probably pick the highest-step `best_wr*.zip` when no periodic checkpoint exists newer than the best_model. Would have recovered more steps. Not blocking — noting for a future PR.
+
+**Next gate:** By step 200K, sustained WR should re-enter the 48%+ band (matching the pre-crash trajectory). If it clears 55%, the plan worked. If it plateaus in the 40s again, the previous decline was a schedule issue (temperature anneal rate vs League difficulty), not a weights issue — and we need to rethink Phase B → League handoff.
+
+---
+
+## 2026-04-19 (evening-3) — [RBY] Replay Review: Simulator Clean, Agent Plays Poorly
+
+**Trigger:** User flagged `run_056/replays/notable/run_056_league_step100k_wr0.50_1.html` — "tauros hyper beam seems bugged."
+
+**[RBY] specialist verdict: simulator is correct, agent strategy is bad.**
+
+**Mechanics check (clean):**
+- Turn 3: Tauros HB crits Lapras 463→75 (survives) → `-mustrecharge` → Tauros dies turn 4 on recharge. Correct Gen 1.
+- Turn 20: Articuno HB crits Chansey to 54 → recharge → paralyzed. Correct.
+- Turn 23: Articuno HB KOs Chansey (54→0) → **no** recharge line (turn 24 acts freely). This is the famous Gen 1 "HB skips recharge on KO" quirk working exactly as designed.
+- Two HB misses at 90% acc: ~1% probability, unlucky but valid. No 1/256 distortion.
+- `must_recharge` IS in the obs (`src/env/gen1_env.py:236-241, 275`) — network can see it.
+
+**Agent blunders:**
+1. Tauros vs Lapras lead, HB spam at 50% HP: **textbook Smogon mistake**. Body Slam (equal damage band, 30% para, no recharge) is the correct click. Only commit to HB if you can KO or you're at <20% anyway.
+2. Articuno vs Chansey line: wasted Reflect re-click (failed), Agility vs a pure wall (pointless), then HB into full Chansey → para on recharge. Lost a 2nd HB user to the same trap.
+
+**Missing features [RBY] recommends:**
+- **KO-probability gate on HB:** per-move `expected_damage / opp_hp` + `prob_KO` channel. Without it the policy can't learn "HB only when KO ≥ threshold."
+- **Recharge-turn vulnerability bit:** for each move, `causes_recharge_if_survives = is_recharge_move ∧ ¬KO`.
+- **Role features just shipped should help** (Tauros→Special-Wall matchup → switch bias). Check that the switch action isn't being mask-filtered out and that the value head isn't underweighting switch actions.
+
+**Reward-shaping concern:**
+Current shaping (`fainted=0.5, victory=1.0`) pays for trades. Spamming HB still scores +0.5 for the KO, even if we die on recharge. Consider: down-weight self-faint on the same turn as a KO, or switch to pure win/loss + HP-delta.
+
+**Next action options (not yet decided):**
+1. **Let training continue** — maybe role features + more steps is enough.
+2. **Add damage/KO features** (obs change → BC retrain cycle).
+3. **Tweak reward** for recharge moves specifically.
+
+Options 2 and 3 require interrupting the current run. Option 1 defers — if run_056 still plateaus, we escalate to 2 or 3.
+
+---
+
+## 2026-04-19 (late evening) — KO-Probability Obs Features + Mean+Min Gate
+
+**Killed run_056 at step 231,900.** WR oscillating 42–55% band, BestMv% flatlined at 44.7%, ExplVar receded from 0.33 peak → 0.17. Pattern same as pre-crash: peak early (57–58%), degrade into mid-range, stay there. Letting it run to 500K would burn ~14 hrs for more of the same.
+
+**Decision 1 — Ship 3 new per-move obs features (obs 1727 → 1739):**
+
+| Feature | Formula | Why |
+|---|---|---|
+| `expected_dmg_fraction` | `E[damage] / opp_current_hp`, clamped [0, 1.5], folds accuracy in | Direct "will this hit hurt?" signal |
+| `prob_ko` | `P(damage ≥ opp_hp)` over Gen 1's (217..255)/255 roll band, × accuracy | Direct "can I KO right now?" — the gate [RBY] said was missing |
+| `recharge_trap` | `must_recharge × (1 − prob_ko)` | Decision signal: "clicking THIS move puts me in recharge while opp survives" |
+
+Computed only for **own active's 4 moves vs opp active** (not bench/opp-bench — 12 dims total). Uses the full Gen 1 damage formula with STAB, type effectiveness, stage boosts, burn/par modifiers — not the weak `base_power × effectiveness` proxy used by `heuristic_agent._expected_damage`. Appended at the end of the obs, so `obs_transfer.py` zero-pads old 1727-dim checkpoints correctly — **no BC retrain required**, we can warm-start from the 57% peak at step 89K.
+
+**Decision 2 — Mean+Min phase gate, heuristic-only:**
+
+Old gate: `pooled_win_rate ≥ 0.70`. Problem: the pooled WR includes SelfPlay, which is a mirror match that caps at ~50% by construction. Hitting 70% pooled would require ~77% against the three heuristics — nearly impossible.
+
+New gate:
+```
+mean(MaxDmg, TypeMatch, SoftmaxDmg) ≥ 0.65   AND
+min(MaxDmg, TypeMatch, SoftmaxDmg)  ≥ 0.50   AND
+(gate holds for 2 consecutive evals)
+```
+
+The mean arm says "overall competence," the min arm says "no opponent is a hard wall." Both are Smogon-aligned: a policy that crushes MaxDmg (85%) but loses to TypeMatch (35%) averages to 60% but is broken — the min gate catches that. Reported headline `win_rate` unchanged for continuity; only the curriculum-advancement check uses the new gate.
+
+**Impl:** new `stop_heuristic_mean` / `stop_heuristic_min` kwargs on `WinRateCallback`; `CURRICULUM[0]` in `src/train.py` sets them to 0.65 / 0.50. When both are `None`, the code falls back to the old pooled-WR behavior.
+
+**Open question:** `_expected_damage` in `heuristic_agent.py` is still the crude `bp × eff` proxy. The new obs features use the full formula. If we decide to also improve the heuristic players' damage calcs, that's a separate PR — for now they're parallel implementations.

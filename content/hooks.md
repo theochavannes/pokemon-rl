@@ -659,3 +659,30 @@ CodeRabbit reviews each push on each open PR. Free tier: 2 reviews/hour. Sounds 
 **Visual:** Split screen. Left: "Before — 4 commits, 4 reviews, quota exhausted by 2pm." Right: "After — 4 commits locally, 1 push, 1 review, quota still healthy at EOD." Plus a side panel showing the `.coderabbit.yaml` path filters visibly *subtracting* the excluded directories from what gets reviewed.
 
 **Why it's great content:** Every developer who's used AI review hits this wall. The "lose details with squash-merge?" question is a very common beginner worry with a clean answer (you don't — GitHub preserves it). And the framing — "we tuned our workflow to respect an AI tool's budget the same way we'd tune hyperparams" — makes it land on this channel specifically.
+
+
+---
+
+## 2026-04-19: Teaching the Agent to See the KO
+
+**Hook:** "We told the agent everything about each move — base power, type, accuracy, whether it causes a recharge. It still spammed Hyper Beam into a full-HP Lapras and died. Why? Because 'will this move KO?' is not in the observation. It was implied."
+
+The obs already has:
+- `base_power` (normalized to 150)
+- `effectiveness` (type chart, 0.25× … 4×)
+- `accuracy`
+- `must_recharge` (static flag: does this move require recharge?)
+- Opponent's current HP (fraction)
+
+To answer "can Hyper Beam KO Lapras?" the network has to compute, from these separate inputs: `base_power × STAB × effectiveness × my_Attack / opp_Defense × level_factor`, then compare to `opp_current_HP × opp_max_HP`. Five features, one non-linear composition, all under noisy terminal-reward signal. It never learned it — BestMv% stuck at 44.7%, voluntary switches 0.8%.
+
+**The fix:** Three new features per move, appended to the obs:
+- `expected_dmg_fraction` = E[damage] ÷ opp_current_HP (clamped)
+- `prob_ko` = P(damage ≥ opp_HP) over Gen 1's 217–255/255 roll band
+- `recharge_trap` = `must_recharge × (1 − prob_ko)` — "clicking this commits you to a recharge while they're still alive"
+
+These are pre-computed answers, not more ingredients. Same philosophy as `matchup_baseline` (already in obs): compute the non-linear combination a Smogon player instantly sees, hand it to the network as a direct feature.
+
+**Visual:** Screen split. Left: a neural net labeled "implied knowledge" with arrows trying to compose `BP × type × stats × HP` into a single decision. Right: three bars labeled `prob_ko=0.12`, `recharge_trap=0.88`, `exp_dmg=0.34` — the decision signal served directly. Superimpose the replay of Tauros getting wrecked by Lapras, with a "KO prob: 12%" caption over the Hyper Beam click.
+
+**Why it's great content:** The classic "feature engineering vs deep learning" beat. Audience learns that modern nets are powerful but not magic — giving them the answer directly is often faster and more reliable than asking them to infer it. Plus the Smogon-player cameo (the specialist who pointed out the blunder) is a natural narrative throughline.
