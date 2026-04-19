@@ -686,3 +686,27 @@ These are pre-computed answers, not more ingredients. Same philosophy as `matchu
 **Visual:** Screen split. Left: a neural net labeled "implied knowledge" with arrows trying to compose `BP × type × stats × HP` into a single decision. Right: three bars labeled `prob_ko=0.12`, `recharge_trap=0.88`, `exp_dmg=0.34` — the decision signal served directly. Superimpose the replay of Tauros getting wrecked by Lapras, with a "KO prob: 12%" caption over the Hyper Beam click.
 
 **Why it's great content:** The classic "feature engineering vs deep learning" beat. Audience learns that modern nets are powerful but not magic — giving them the answer directly is often faster and more reliable than asking them to infer it. Plus the Smogon-player cameo (the specialist who pointed out the blunder) is a natural narrative throughline.
+
+---
+
+## 2026-04-19: The Plateau That Won't Break — And What We Learned
+
+**Hook:** "We added KO probability features. The agent hit a new record of 65%. Then crashed back to 47%. What's actually going on?"
+
+run_057 trajectory (obs 1739, warm-started from 57% checkpoint):
+- Steps 0–50K: critic warmup, actor frozen — WR noise ~47%
+- Steps 50–176K: actor unfreezes, climbs to **59% new best** (beats prior OU-pool ceiling of 58%)
+- Steps 176–314K: stagnates at ~47% average, occasional spikes
+- Step 355K: jumps to **65%** — two milestones crossed simultaneously
+- Steps 355–382K: collapses straight back to 43–50%, BestMv% frozen at exactly 45.0%
+- Killed at step 382K
+
+**The vol_switch paradox:** Despite adding `recharge_trap` — a feature literally designed to signal "don't click Hyper Beam when you won't KO" — voluntary switch rate barely moved: 1.0% → 1.2%. The agent improved at picking the *right move*, but not at deciding *when to switch*. BestMv% went from 42% → 45%, dmg_eff from 0.56 → 0.59. The KO features helped within-turn, not between-turn.
+
+**The spike-and-crash pattern:** Every run plateaus the same way. The agent builds a local policy that averages ~47% WR, but evaluation variance (100 games) produces occasional 60–65% spikes. The policy doesn't actually improve to that level — the spike is sampling luck. This is a signal that the evaluation window is too small to clearly distinguish real improvement from variance.
+
+**The apples-vs-oranges problem:** run_054 (all-species pool) hit 69% WR. run_057 (OU-only) peaked at 65%. These are not comparable — OU teams have no Magikarp, no Pidgey, no free wins. The harder the opponent pool, the lower the realistic WR ceiling for a given policy quality.
+
+**Visual:** Two time-series charts overlaid. run_054 (all-species) vs run_057 (OU-only). run_054 climbs faster and higher, but its opponents included weak mons. run_057 is slower but every win is harder-earned. The "which is better?" question has no clean answer — and that's the point.
+
+**Why it's great content:** The plateau problem is universal in RL. The agent isn't "dumb" — it's stuck in a local optimum where the policy is good enough to sometimes win but not good enough to consistently improve. The question "what structural change actually breaks the plateau?" is the real engineering challenge, and the audience gets to follow that investigation in real time.
