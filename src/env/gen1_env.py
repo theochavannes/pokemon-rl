@@ -3,16 +3,16 @@ Gen 1 (RBY) Gymnasium environment.
 
 Wraps poke-env's SinglesEnv for use with MaskablePPO.
 
-Observation space : Box(-1, 1, shape=(1559,), float32)
+Observation space : Box(-1, 1, shape=(1727,), float32)
 Action space      : Discrete — provided by SinglesEnv, masked via action_masks()
 Reward            : Shaped (fainted/HP/status deltas) + terminal victory bonus
 
 Env stack for training:
     Gen1Env (SinglesEnv subclass)
         ↓
-    SingleAgentWrapper   obs = {"observation": np.array(1559,), "action_mask": np.array(N,)}
+    SingleAgentWrapper   obs = {"observation": np.array(1727,), "action_mask": np.array(N,)}
         ↓
-    SB3Wrapper           obs = np.array(1559,)  +  action_masks() -> bool array
+    SB3Wrapper           obs = np.array(1727,)  +  action_masks() -> bool array
         ↓
     DummyVecEnv / SubprocVecEnv
 """
@@ -31,7 +31,7 @@ from poke_env.environment.single_agent_wrapper import SingleAgentWrapper
 from poke_env.environment.singles_env import SinglesEnv
 from poke_env.ps_client.account_configuration import AccountConfiguration
 
-from src.tier_baseline import matchup_baseline
+from src.tier_baseline import NUM_ROLES, matchup_baseline, roles_for
 
 _GEN1_TYPE_CHART = GenData.from_gen(1).type_chart
 
@@ -314,12 +314,24 @@ def _base_stats(pokemon) -> list:
     ]
 
 
-_OBS_DIM = 1559
+_ROLE_DIMS = NUM_ROLES * 14  # 14 slots × 12 roles = 168
+_OBS_DIM = 1559 + _ROLE_DIMS  # 1727
+
+
+def _role_features(pokemon) -> list:
+    """Return the 12-dim competitive role vector for a Pokemon (zeros if unknown)."""
+    if pokemon is None:
+        return [0.0] * NUM_ROLES
+    try:
+        species = pokemon.species.lower().replace("-", "").replace(" ", "")
+    except Exception:
+        return [0.0] * NUM_ROLES
+    return [float(x) for x in roles_for(species)]
 
 
 def embed_battle(battle) -> np.ndarray:
     """
-    Produces a 1559-dim float32 observation from a poke-env Battle object.
+    Produces a 1727-dim float32 observation from a poke-env Battle object.
 
     Observation layout:
       Own active        16    HP, 6 boosts, status, active, fainted, types, base stats
@@ -335,6 +347,7 @@ def embed_battle(battle) -> np.ndarray:
       Opp status threat  1
       Toxic counter      1
       Turn phase         1    normalized turn number (S7.2)
+      Role features    168    14 slots × 12 roles (own active+6 bench, opp active+6 bench)
     """
     obs = []
     own = battle.active_pokemon
@@ -482,6 +495,26 @@ def embed_battle(battle) -> np.ndarray:
     turn_phase = min(battle.turn / 50.0, 1.0) if hasattr(battle, "turn") else 0.0
     obs.append(turn_phase)
 
+    # --- Role features (168 dims = 14 slots × 12 roles) ---
+    # Own active
+    obs.extend(_role_features(own))
+    # Own bench (up to 6 slots, zero-padded)
+    own_team = list(battle.team.values())
+    for i in range(6):
+        if i < len(own_team):
+            obs.extend(_role_features(own_team[i]))
+        else:
+            obs.extend([0.0] * NUM_ROLES)
+    # Opponent active
+    obs.extend(_role_features(opp))
+    # Opponent bench (up to 6 slots, zero-padded — unrevealed => zeros)
+    opp_team = list(battle.opponent_team.values())
+    for i in range(6):
+        if i < len(opp_team):
+            obs.extend(_role_features(opp_team[i]))
+        else:
+            obs.extend([0.0] * NUM_ROLES)
+
     result = np.array(obs, dtype=np.float32)
     assert result.shape == (_OBS_DIM,), f"Obs shape mismatch: expected ({_OBS_DIM},), got {result.shape}"
     assert np.all(np.isfinite(result)), "Obs contains NaN/Inf"
@@ -492,7 +525,7 @@ class Gen1Env(SinglesEnv):
     """
     Gen 1 random battle environment for MaskablePPO.
 
-    Observation: 1559-dim float32 vector (see embed_battle docstring for layout).
+    Observation: 1727-dim float32 vector (see embed_battle docstring for layout).
     """
 
     def __init__(self, shaping_factor: float = 1.0, **kwargs):

@@ -198,6 +198,103 @@ def _normalize_species(raw: str) -> str:
     return raw.lower().replace("-", "").replace(" ", "").replace("'", "").replace(".", "")
 
 
+# ---------------------------------------------------------------------------
+# Competitive roles (12-dim multi-label binary vectors per species)
+#
+# Index | Role                Example mons
+#   0   Physical Sweeper      Tauros, Rhydon, Dodrio
+#   1   Special Sweeper       Alakazam, Starmie, Jynx
+#   2   Mixed Attacker        Nidoking, Charizard, Dragonite
+#   3   Physical Wall         Golem, Rhydon
+#   4   Special Wall          Chansey, Slowbro, Lapras
+#   5   Status Spreader       Exeggutor (Sleep), Jynx (Lovely Kiss), Venusaur
+#   6   Revenge Killer        Jolteon, Electrode, Tauros, Persian
+#   7   Pivot                 Slowbro, Chansey
+#   8   Setup Sweeper         Snorlax (Amnesia), Slowbro (Amnesia)
+#   9   Trapper               Cloyster (Clamp), Dragonite (Wrap)
+#  10   Tank                  Snorlax, Lapras, Vaporeon
+#  11   Utility               Starmie, Alakazam, Chansey (speed / support)
+# ---------------------------------------------------------------------------
+
+NUM_ROLES = 12
+
+_ROLE = {
+    "PHYS_SWEEP": 0,
+    "SPEC_SWEEP": 1,
+    "MIXED": 2,
+    "PHYS_WALL": 3,
+    "SPEC_WALL": 4,
+    "STATUS": 5,
+    "REVENGE": 6,
+    "PIVOT": 7,
+    "SETUP": 8,
+    "TRAPPER": 9,
+    "TANK": 10,
+    "UTILITY": 11,
+}
+
+
+def _roles(*names: str) -> list[int]:
+    vec = [0] * NUM_ROLES
+    for n in names:
+        vec[_ROLE[n]] = 1
+    return vec
+
+
+GEN1_ROLE_MAP: dict[str, list[int]] = {
+    # --- Tier 5: OU dominant ---
+    "tauros": _roles("PHYS_SWEEP", "REVENGE"),
+    "chansey": _roles("SPEC_WALL", "STATUS", "UTILITY", "PIVOT"),
+    "snorlax": _roles("TANK", "SETUP", "PHYS_SWEEP"),
+    "exeggutor": _roles("STATUS", "MIXED", "TANK"),
+    "starmie": _roles("SPEC_SWEEP", "REVENGE", "UTILITY"),
+    "alakazam": _roles("SPEC_SWEEP", "REVENGE", "UTILITY"),
+    # --- Tier 4: OU solid / high UU ---
+    "jynx": _roles("STATUS", "SPEC_SWEEP"),
+    "zapdos": _roles("SPEC_SWEEP", "STATUS"),
+    "lapras": _roles("TANK", "SPEC_WALL", "SPEC_SWEEP"),
+    "rhydon": _roles("PHYS_SWEEP", "PHYS_WALL", "TANK"),
+    "golem": _roles("PHYS_WALL", "PHYS_SWEEP"),
+    "cloyster": _roles("TRAPPER", "PHYS_WALL"),
+    "gengar": _roles("SPEC_SWEEP", "STATUS"),
+    "slowbro": _roles("SETUP", "SPEC_WALL", "PIVOT"),
+    "articuno": _roles("SPEC_SWEEP", "TANK"),
+    "moltres": _roles("SPEC_SWEEP"),
+    # --- Tier 3: UU / usable ---
+    "jolteon": _roles("SPEC_SWEEP", "REVENGE", "STATUS"),
+    "hypno": _roles("STATUS", "UTILITY"),
+    "dragonite": _roles("MIXED", "TRAPPER"),
+    "persian": _roles("PHYS_SWEEP", "REVENGE"),
+    "dodrio": _roles("PHYS_SWEEP", "REVENGE"),
+    "victreebel": _roles("STATUS", "PHYS_SWEEP"),
+    "venusaur": _roles("STATUS", "TANK"),
+    "mrmime": _roles("UTILITY", "STATUS"),
+    "electrode": _roles("REVENGE", "SPEC_SWEEP"),
+    "charizard": _roles("MIXED"),
+    "blastoise": _roles("TANK", "SPEC_WALL"),
+    "nidoking": _roles("MIXED"),
+    "nidoqueen": _roles("MIXED", "TANK"),
+    "poliwrath": _roles("SETUP", "MIXED", "TANK"),
+    "machamp": _roles("PHYS_SWEEP"),
+    "tentacruel": _roles("SPEC_SWEEP", "SPEC_WALL"),
+    "kangaskhan": _roles("PHYS_SWEEP", "TANK"),
+    "vaporeon": _roles("TANK", "SPEC_WALL", "SETUP"),
+    "flareon": _roles("MIXED"),
+    "omastar": _roles("SPEC_SWEEP"),
+    "kabutops": _roles("PHYS_SWEEP"),
+    "aerodactyl": _roles("PHYS_SWEEP", "REVENGE"),
+    # Ditto: transforms into opponent — no fixed role signal
+    "ditto": [0] * NUM_ROLES,
+}
+
+_ZERO_ROLE_VEC = [0] * NUM_ROLES
+
+
+def roles_for(species: str) -> list[int]:
+    """Return the 12-dim role vector for a species, or all zeros if unknown."""
+    return GEN1_ROLE_MAP.get(species, _ZERO_ROLE_VEC)
+
+
 def team_score(team: dict) -> float:
     """Sum tier ratings for a team dict (poke-env battle.team / battle.opponent_team)."""
     import logging
