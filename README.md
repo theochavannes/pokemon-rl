@@ -2,126 +2,133 @@
 
 Training a reinforcement learning agent to play competitive Gen 1 (RBY) Pokemon using [Pokemon Showdown](https://github.com/smogon/pokemon-showdown) as the battle simulator.
 
-The agent learns through mixed-opponent training with adaptive difficulty — facing all opponent archetypes simultaneously, starting mostly random and annealing to full-strength as performance improves.
+![Python 3.11](https://img.shields.io/badge/python-3.11-blue) ![Tests](https://github.com/theochavannes/pokemon-rl/actions/workflows/test.yml/badge.svg)
 
 ---
 
-## Progress
+## Results
 
-| Phase | Description | Status |
-|---|---|---|
-| 1 | Infrastructure — Showdown server, Python env, dependencies | Done |
-| 2 | Gen 1 Gymnasium environment (421-dim observation space) | Done |
-| 3 | Baseline agents — MaxDamage, TypeMatchup, Stall, AggressiveSwitcher | Done |
-| 4 | Mixed-opponent training with epsilon annealing | In progress |
-| 5 | Self-play with frozen policy snapshots | Pending |
-| 6 | Evaluation, replay analysis, tournament | Pending |
+After 57 training runs with a 4-phase curriculum against mixed opponents:
 
----
-
-## Stack
-
-- **Simulator** — [Pokemon Showdown](https://github.com/smogon/pokemon-showdown) (local Node.js server, git submodule)
-- **RL framework** — [stable-baselines3](https://github.com/DLR-RM/stable-baselines3) + [sb3-contrib](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib) (MaskablePPO)
-- **Environment** — [poke-env](https://github.com/hsahovic/poke-env) 0.13 (Gymnasium interface to Showdown)
-- **Battle format** — `gen1randombattle` (random teams, no team preview)
-- **Python** — 3.11, conda
-- **GPU** — NVIDIA GeForce, CUDA 12.0
+| Metric | Value |
+|---|---|
+| Peak win rate vs OU-only heuristics | **65%** (run_057, step 355K) |
+| vs MaxDamage | ~68% |
+| vs TypeMatchup | ~61% |
+| vs Random | ~91% |
+| Training runs completed | 57 |
+| Observation space | 1,739 features |
+| Species pool | 39 OU-only Gen 1 species |
 
 ---
 
-## Setup
+## Quick Start
 
-**1. Clone with submodule**
 ```bash
 git clone --recurse-submodules https://github.com/theochavannes/pokemon-rl.git
 cd pokemon-rl
+pip install -e .
+cd showdown && npm install && node pokemon-showdown start --no-security &
+python scripts/evaluate.py --model models/best_model_v1.zip
 ```
 
-**2. Install Showdown dependencies**
-```bash
-cd showdown
-npm install
-cd ..
-```
+The best trained checkpoint (`models/best_model_v1.zip`, 11.6 MB) is committed to the repo.
 
-**3. Create conda environment**
-```bash
-conda create -n pokemon_rl python=3.11
-conda activate pokemon_rl
-pip install poke-env stable-baselines3 sb3-contrib torch
-```
+---
 
-**4. Start the Showdown server** (keep this terminal open)
-```bash
-cd showdown
-node pokemon-showdown start --no-security
-```
+## Architecture
 
-**5. Verify everything works**
-```bash
-python scripts/verify_setup.py
+```
+Pokemon Showdown (Node.js, local WebSocket)
+         |
+poke-env 0.13 (Gymnasium interface)
+         |
+Gen1Env (src/env/gen1_env.py)
+  - 1739-dim float32 observation
+  - action masking (invalid moves/switches blocked)
+  - shaped reward (fainted=0.5, victory=1.0, decays over 5K battles)
+         |
+MaskablePPO (sb3-contrib) — 256x128 MLP policy
+         |
+4-env DummyVecEnv mixed league
+  env 0: SelfPlay (frozen snapshot)
+  env 1: MaxDamagePlayer
+  env 2: TypeMatchupPlayer
+  env 3: SoftmaxDamagePlayer (temperature-annealed)
 ```
 
 ---
 
-## Training
+## Key Technical Contributions
 
-### 4-phase curriculum
+- **Observation-space transfer learning** (`src/obs_transfer.py`) — zero-pads prior checkpoints to a larger obs dimension, enabling incremental feature additions without full retraining.
+- **KO-probability features** — per-move `prob_ko`, `expected_dmg_fraction`, and `recharge_trap` computed using the full Gen 1 damage formula (crit rate from Speed, type chart, base power, HP fractions).
+- **Mean+min phase gate** — curriculum advances only when `mean(heuristic WRs) >= 0.65` AND `min >= 0.50` for 2 consecutive evals, preventing premature phase transitions driven by a single easy opponent.
+- **OU-only species pool** — filtered `gen1randombattle` to 39 OU-eligible Gen 1 species, removing unevolved and non-competitive Pokemon that inflate win rates without teaching transferable play.
 
-The agent progresses through increasingly difficult opponents. Each phase auto-advances when the win rate target is sustained at full difficulty.
+---
 
-| Phase | Opponent | How it works | Target |
-|---|---|---|---|
-| A | Random | Uniform random actions (baseline) | 85% |
-| B | RandomAttacker | Random moves 85%, random switch 15% (realistic) | 80% |
-| C | SoftmaxDamage | Moves sampled proportional to damage^(1/temp). Temperature anneals from 2.0 (soft) to 0.1 (near-argmax MaxDamage) based on win rate | 70% at temp=0.1 |
-| D | Mixed+Self | All heuristic opponents + frozen self-play. Smooth difficulty via temperature/epsilon annealing | 60% |
+## Observation Space (1,739 dims)
+
+All Pokemon are forced to level 100 in Showdown for training consistency.
+
+```
+Own active          28 dims   HP, 6 boosts (+accuracy/evasion), status, active,
+                              fainted, type x2, 6 base stats*, 3 KO features/move
+Own moves           28 dims   4 moves x 7 features (power, type, PP, effectiveness,
+                              accuracy, prob_ko, expected_dmg_fraction)
+Own bench          240 dims   6 slots x 40 (HP, fainted, types, status, base stats,
+                              4 moves x 7 features w/ KO features)
+Opponent active     27 dims   HP, 6 boosts, status, fainted, type x2, 6 base stats*
+Opponent bench     240 dims   6 slots x 40 (HP, fainted, revealed, types, base stats,
+                              up to 4 revealed moves x 7 features)
+Role features      168 dims   Competitive role tags: sweeper, wall, status-setter,
+                              revenge-killer, pivot (own bench + opponent bench)
+Opp revealed mvs    28 dims   up to 4 seen opponent active moves x 7 features
+Trapping            2 dims    own_trapped, own_maybe_trapped (Wrap/Bind flags)
+```
+
+`* base_spe is paralysis-adjusted — PAR quarters speed in Gen 1 independently of stage boosts`
+
+Key design decisions:
+- **Full bench info** — all 4 moves per bench Pokemon with effectiveness vs current opponent enables informed switching
+- **KO features** — `prob_ko` and `expected_dmg_fraction` expose the kill-or-not decision explicitly in obs
+- **Role tags** — sweeper/wall/pivot labels extracted from base stat profiles (see `src/env/gen1_env.py`)
+- **Opponent memory** — unrevealed slots start at -1.0, distinct from fainted (0.0)
+
+---
+
+## Training Curriculum
+
+The agent trains against all heuristic opponents simultaneously from the start (mixed league), with difficulty annealed via temperature and epsilon parameters. Phase advances are gated on sustained win-rate criteria.
+
+| Phase | Target | Description |
+|---|---|---|
+| A | Critic warmup | 100 rollouts with frozen actor, no phase gate |
+| B | WR >= 0.50 | Full training begins against mixed opponents |
+| C | mean >= 0.65, min >= 0.50 | Tighten temperature annealing |
+| D | Plateau | Self-play pool activated |
+
+**Mixed league (4 envs):**
+- `MaxDamagePlayer` — always picks highest base_power × type_effectiveness
+- `TypeMatchupPlayer` — best typed move, switches out of bad matchups
+- `SoftmaxDamagePlayer` — damage-proportional sampling, temperature annealed 2.0 → 0.1
+- `FrozenPolicyPlayer` — frozen snapshot of agent itself (self-play)
 
 ```bash
-python src/train.py --new-run    # start fresh
+python src/train.py --new-run    # start a new run
 python src/train.py              # resume latest run
 ```
 
-**Heuristic opponents** (used in Phase D mixed pool):
-| Opponent | Strategy |
-|---|---|
-| MaxDamage | Always picks highest base_power x type_effectiveness move |
-| TypeMatchup | Best type move, switches out of bad matchups |
-| Stall | Status moves first (TWave, Toxic), then damage |
-| AggressiveSwitcher | Switches to type-counter aggressively |
-
-**Reward shaping** (linearly decays to 0 over 5000 battles):
-- `hp_value=0.5` — reward for dealing damage, penalty for taking it
-- `fainted_value=0.5` — reward for KOs, penalty for own Pokemon fainting
-- `status_value=0.1` — reward for inflicting status conditions
-- `victory_value=3.0` — winning always dominates
-
-**Self-play** (after curriculum):
-```bash
-python src/selfplay_train.py
-```
-
 ---
 
-### Run management
+## What I'd Do Next
 
-Every training session creates an isolated folder: `runs/run_001/`, `runs/run_002/`, etc.
+The agent is stuck in a "never switch" local optimum (~1% voluntary switch rate across all 57 runs). The PPO gradient from terminal rewards alone is too weak to bootstrap switching behaviour.
 
-```
-runs/run_001/
-  models/          checkpoints (gitignored)
-  logs/            TensorBoard data (gitignored)
-  replays/         battle replays per phase (gitignored)
-    notable/       milestone replay snapshots
-  training_log.md  win rate table (committed)
-  run_info.json    hyperparameters + status (committed)
-```
-
-**TensorBoard**
-```bash
-tensorboard --logdir runs/run_001/logs/
-```
+- **Behavioural cloning pretraining** — generate expert demonstrations from `TypeMatchupPlayer`, pretrain a BC checkpoint, then fine-tune with PPO. This directly seeds the switch-behaviour prior.
+- **Richer reward signal for switching** — shaped reward for switching into a type advantage, rather than relying on the delayed terminal signal.
+- **Larger network** — current 256×128 MLP may lack capacity to represent the full Gen 1 matchup graph. A 512×256 or attention-based architecture could help.
 
 ---
 
@@ -131,59 +138,33 @@ tensorboard --logdir runs/run_001/logs/
 pokemon_rl/
 ├── showdown/               # Pokemon Showdown server (git submodule)
 ├── src/
-│   ├── env/gen1_env.py     # Gymnasium environment — 421-dim obs, shaped reward
+│   ├── env/gen1_env.py     # Gymnasium environment — 1739-dim obs, shaped reward
 │   ├── agents/
-│   │   ├── heuristic_agent.py   # 4 heuristic opponents + epsilon wrappers
+│   │   ├── heuristic_agent.py   # MaxDamage, TypeMatchup, Softmax + epsilon wrappers
 │   │   └── policy_player.py     # FrozenPolicyPlayer (self-play opponent)
-│   ├── train.py            # Mixed-opponent training with epsilon annealing
+│   ├── train.py            # 4-phase curriculum training loop
 │   ├── selfplay_train.py   # Self-play with frozen snapshots
-│   ├── callbacks.py        # WinRateCallback — logging, milestones, epsilon decay
-│   ├── obs_transfer.py     # Obs-space transfer learning for model compatibility
+│   ├── callbacks.py        # WinRateCallback — logging, milestones, annealing
+│   ├── obs_transfer.py     # Obs-space transfer learning for checkpoint compatibility
 │   └── run_manager.py      # Run isolation (runs/run_NNN/)
 ├── scripts/
-│   ├── verify_setup.py
+│   ├── evaluate.py         # Benchmark a checkpoint vs heuristic opponents
+│   ├── verify_setup.py     # End-to-end smoke test
 │   ├── benchmark_heuristic.py
 │   └── battle_sim.py       # Simulate any two agents head-to-head
-├── runs/                   # Training runs (gitignored except logs)
-└── content/                # Documentation and YouTube video notes
+├── models/
+│   └── best_model_v1.zip   # Best checkpoint (65% WR, obs_dim=1739)
+├── tests/
+│   └── test_core.py        # Unit tests (pytest)
+└── PLAN.md                 # 6-phase implementation roadmap
 ```
 
 ---
 
-## Observation Space (421 dims)
-
-All Pokemon are forced to level 100 in Showdown config for training consistency — level is omitted from observations.
-
-```
-Own active        16 dims   HP, 6 boosts (incl accuracy/evasion), status, active, fainted,
-                            type_1, type_2, base_atk, base_def, base_spa, base_spe*
-Own moves         20 dims   4 moves x 5 features (base_power, type, PP, effectiveness, accuracy)
-Own bench        174 dims   6 slots x 29 (HP, fainted, types, status, 4 base stats,
-                            4 moves x 5 features w/ effectiveness vs opponent)
-Opponent active   15 dims   HP, 6 boosts (incl accuracy/evasion), status, fainted,
-                            type_1, type_2, base_atk, base_def, base_spa, base_spe*
-Opponent bench   174 dims   6 slots x 29 (HP, fainted, revealed, types, 4 base stats,
-                            up to 4 revealed moves x 5 features w/ effectiveness vs own active)
-Opp revealed mvs  20 dims   up to 4 seen opponent active moves x 5 features (padded)
-Trapping           2 dims   own_trapped, own_maybe_trapped (Wrap/Bind flags)
-```
-`* base_spe is paralysis-adjusted — PAR quarters speed in Gen 1 independently of stage boosts`
-
-Key design decisions:
-- **Level 100 forced** — Showdown modified to set all Pokemon to level 100, eliminating level variance
-- **Full bench info** — all 4 moves per bench Pokemon with effectiveness vs current opponent enables informed switching
-- **Paralysis speed correction** — PAR's 0.25x speed penalty applied directly to speed value
-- **Move accuracy** — distinguishes Thunder (70%) from Thunderbolt (100%)
-- **Opponent revealed moves** — memory of what the opponent has used
-- **Unrevealed opponent slots** start with -1.0 — distinct from fainted (0.0)
-
----
-
-## Key Gen 1 Mechanics
+## Gen 1 Mechanics
 
 - **1/256 miss** — nominally 100% moves have a tiny miss chance
 - **Freeze is permanent** — one of the strongest status conditions
-- **Single Special stat** — no Sp.Atk / Sp.Def split
+- **Single Special stat** — no Sp.Atk / Sp.Def split; one stat covers both
 - **Crit rate from Speed** — fast Pokemon (Tauros, Starmie) crit far more often
-- **No held items, no team preview**
-- **Sleep Clause** — max 1 opponent Pokemon asleep at a time
+- **No held items, no team preview** — pure positioning and read-based play
