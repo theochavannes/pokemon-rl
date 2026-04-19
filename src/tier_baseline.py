@@ -182,20 +182,42 @@ GEN1_TIER_RATINGS: dict[str, int] = {
     "drowzee": 1,
     "tentacool": 1,
     "krabby": 1,
-    # --- Ubers: excluded from the random pool (filter_ou_pool.py) ---
-    "mew": 5,
-    "mewtwo": 5,
+    # Ubers (Mew, Mewtwo) are intentionally absent — they are excluded from
+    # the random pool by scripts/filter_ou_pool.py, and we don't want a
+    # fallback rating here to silently give them the highest matchup score
+    # if the filter is ever skipped.
 }
 
 _DEFAULT_TIER = 3  # With OU-only pool, unknown species should default near-OU
 
+_warned_species: set[str] = set()
+
+
+def _normalize_species(raw: str) -> str:
+    """Strip characters that vary between poke-env outputs (hyphens, spaces, apostrophes, periods)."""
+    return raw.lower().replace("-", "").replace(" ", "").replace("'", "").replace(".", "")
+
 
 def team_score(team: dict) -> float:
     """Sum tier ratings for a team dict (poke-env battle.team / battle.opponent_team)."""
+    import logging
+
     total = 0.0
     for mon in team.values():
-        species = mon.species.lower().replace("-", "").replace(" ", "")
-        total += GEN1_TIER_RATINGS.get(species, _DEFAULT_TIER)
+        raw = mon.species
+        species = _normalize_species(raw)
+        if species in GEN1_TIER_RATINGS:
+            total += GEN1_TIER_RATINGS[species]
+        else:
+            total += _DEFAULT_TIER
+            if species not in _warned_species:
+                _warned_species.add(species)
+                logging.getLogger("pokemon_rl.tier_baseline").warning(
+                    "No tier rating for species %r (normalized %r) — using default %d",
+                    raw,
+                    species,
+                    _DEFAULT_TIER,
+                )
     return total
 
 
