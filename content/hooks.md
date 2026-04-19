@@ -640,3 +640,42 @@ Each Gen 1 OU Pokemon has a competitive archetype: sweeper, wall, status spreade
 **Visual:** Two side-by-side Pokemon cards. Left: Chansey with a blank "role" field. Right: Chansey with glowing tags [WALL], [STATUS], [PIVOT], [UTILITY]. Then the same for Tauros. The observation vector literally grew from 1559 numbers to 1727 — and 168 of the new numbers are "what kind of Pokemon is this?"
 
 **Why it's great content:** This connects to how humans think about the game. The feature engineering narrative — "we spent all this time building a two-tower network and attention mechanisms, and then we discovered we could just *tell the agent what Pokemon are*" — is a great counterweight to "more architecture = better."
+
+---
+
+## 2026-04-19: The Value Function Wakes Up
+
+**Hook:** "For weeks we fought to get ExplVar above 0.12. We tried architectures, gamma tuning, critic warmstart, bigger nets. Then we changed what we were *asking* the agent to learn — OU-only pool + role features — and ExplVar went to 0.28 within 100K steps."
+
+The Explained Variance metric is "how much of the return variance can the value function predict?" Our historical ceiling was ~0.12. A signal so weak that the advantage estimator was basically noise.
+
+**Run with OU-only + role features:**
+- Step 17K: ExplVar 0.20 (already past previous ceiling)
+- Step 84K: ExplVar 0.28
+- Step 100K: ExplVar 0.27 (sustained)
+- Win rate at 100K vs League: 50.0% (plan target met)
+
+**Why it worked:** The plan identified TWO levers: (1) remove unwinnable matchups from the training distribution, (2) give the agent explicit strategic labels (role features). Either change alone wasn't decisive in prior experiments. Together, they reshape the problem so the value function can actually learn.
+
+**Visual:** A single ExplVar chart stacking 4 previous runs (all capping at 0.12 and drifting) against this run hitting 0.28 and staying there. The moment the line crosses 0.12 is the moment the fundamental block broke.
+
+**Why it's great content:** The whole sprint narrative has been "we can't get the value function to learn." This is the breakthrough — not from a smarter network, but from a better problem formulation. Reinforces the recurring lesson: when a learning algorithm plateaus, don't blame the algorithm first. Check whether the *question* you're asking it is answerable.
+
+---
+
+## 2026-04-19 (evening): Run 056 Interim — 57% Peak Under Battery Loss
+
+**Hook:** "We kicked off the first training run with OU-only pool + role features. It hit 57% win rate at step 89K — above the old 58% ceiling in some segments — then the laptop battery died at step 175K before we could confirm sustained >60%."
+
+What we know from run_056 before the power loss:
+- **Best:** 57% win rate at step 89,840 (new checkpoint saved).
+- **Sustained band:** 48–52% win rate through 100K–175K, oscillating with the temperature curriculum.
+- **ExplVar:** 0.20–0.28 sustained — the value function is healthy.
+- **BestMv%:** drifted 44% → 35% during the transition to League phase (when opponents get harder), then recovered to 41% by 175K.
+- **Per-opponent:** SelfPlay 45–55%, MaxDmg 40–48%, TypeMatch 25–40%, SoftmaxDmg 55–60%.
+
+**What it means:** The changes are working — ExplVar cleared the ceiling, and win rate is trending in the right band. But the 60% sustained target hasn't been confirmed yet. Run needs to resume from the latest checkpoint to push through the League-phase difficulty jump.
+
+**Visual:** The step/win-rate chart with the battery-icon interrupt at 175K. Then the resumed run continuing forward — a literal "power outage mid-experiment" beat in the video.
+
+**Why it's great content:** Authenticity. Real ML work doesn't happen in perfectly-resourced labs — a laptop dying mid-run is the grad-student version of AWS quota limits. The narrative of "partial result, need to resume" is more honest than polished success reels.

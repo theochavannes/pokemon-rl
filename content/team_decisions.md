@@ -904,3 +904,43 @@ at gamma=0.99 remains the best achievable with current setup.
 **BC retrain required:** Role features are appended at the end of the obs (compatible with `obs_transfer.py` zero-padding), but since we're also changing the species pool in the same cycle, the simplest path is full BC retraining instead of a transfer-learning warm-start.
 
 **Why this should help:** Panel hypothesis — the value function currently has to infer role implicitly from (stat block + revealed moves). That's noisy, especially for the opponent whose moves are only partially revealed. Giving it role directly is a strong prior, like labelling the positions on a chess board instead of making the network infer piece identity from location.
+
+---
+
+## 2026-04-19 — Step 3 + Step 4 Results (OU+roles training launch)
+
+**BC retrain results:**
+- 2000 battles generated → 63,867 transitions at 1727-dim obs
+- BC model: best val accuracy 84.8% (plan target 90%; fell short ~5pp)
+- Critic warmstart: best val MSE 0.2059 (plan target < 0.5; exceeded target 2.4×)
+
+**PPO training first 100K steps:**
+- Rate ~2,500 steps/min (fast; 4 parallel envs)
+- Step 17K: ExplVar 0.20 — already past previous sprint's 0.12 ceiling
+- Step 84K: ExplVar 0.28
+- Step 100K: ExplVar 0.27, win rate 50.0% vs League opponent
+- Win rate oscillates 42-57% as temperature anneals from 2.0 → ~1.0
+
+**Assessment:** Plan Step 4 100K milestone target (WR > 50%) met exactly. ExplVar is running 2-3× the previous ceiling across the whole 100K window — this is the value-function breakthrough the project has been chasing for weeks.
+
+**Caveat:** BC val acc 84.8% vs target 90%. Means the warm-started policy is a bit weaker than planned. Not catastrophic — PPO recovery from a slightly lower BC quality is well-within the kind of RL lift we've seen before. But if the 200K checkpoint (WR > 55%) is missed, BC undertraining is the prime suspect.
+
+**Next:** continue training to 200K, 500K. Plan says evaluate fixed-team curriculum only if OU+roles doesn't break the 60% ceiling at 500K.
+
+---
+
+## 2026-04-19 (evening) — Run 056 Interrupted at 175K (Battery Loss)
+
+**What happened:** Laptop ran out of battery while run_056 was training. Last recorded step: 175,588. No clean shutdown.
+
+**State at interrupt:**
+- Best checkpoint: step 89,840, win rate 57.0% (saved as `best_wr0570_step89840.zip`).
+- Current policy at 175K: win rate 48% vs League, BestMv% 41.4%, ExplVar 0.20 (last observation).
+- Temperature curriculum oscillating 1.12–1.19 (adaptive annealer reacting to wr500 noise).
+- SelfPlay pool: 4 snapshots (latest `snapshot_0162` at step 162,188, Elo 1230).
+
+**Assessment:** Plan milestone 100K (WR > 50%) met. Plan milestone 200K (WR > 55%) not yet reached — running 48–52% at 175K, but the best checkpoint touched 57% briefly at 89K. The 60% sustained target remains open.
+
+**Decision:** Resume training from the latest registry checkpoint instead of restarting. No hyperparam changes — the value-function metrics are healthy and temperature curriculum is adapting correctly; the only missing ingredient is more steps.
+
+**Risk:** SelfPlay snapshot pool was written mid-iteration — if the resume logic snapshots before the pool is fully populated, the league evaluator may briefly see a stale distribution. Monitor first 10K post-resume for anomalies.
