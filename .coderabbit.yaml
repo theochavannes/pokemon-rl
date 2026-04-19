@@ -1,0 +1,26 @@
+# CodeRabbit configuration
+# Docs: https://docs.coderabbit.ai/reference/yaml-template
+language: en-US
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - master
+  path_filters:
+    - "!content/**"
+    - "!notes/**"
+    - "!showdown/**"
+    - "!runs/**"
+    - "!data/**"
+    - "!PLAN.md"
+    - "!IMPROVEMENT_PROMPT.md"
+    - "!AI_TOOLS_EXPLAINED.md"
+    - "!SETUP_AI_TOOLS.md"
+chat:
+  auto_reply: true

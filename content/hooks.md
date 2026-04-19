@@ -640,3 +640,22 @@ Each Gen 1 OU Pokemon has a competitive archetype: sweeper, wall, status spreade
 **Visual:** Two side-by-side Pokemon cards. Left: Chansey with a blank "role" field. Right: Chansey with glowing tags [WALL], [STATUS], [PIVOT], [UTILITY]. Then the same for Tauros. The observation vector literally grew from 1559 numbers to 1727 — and 168 of the new numbers are "what kind of Pokemon is this?"
 
 **Why it's great content:** This connects to how humans think about the game. The feature engineering narrative — "we spent all this time building a two-tower network and attention mechanisms, and then we discovered we could just *tell the agent what Pokemon are*" — is a great counterweight to "more architecture = better."
+
+---
+
+## The Hidden Cost of AI Code Review
+
+**Hook:** "We added an AI reviewer to every PR. Six weeks later, we were hitting the rate limit almost every day."
+
+CodeRabbit reviews each push on each open PR. Free tier: 2 reviews/hour. Sounds generous until you watch what happens on a real PR cycle: feature commit → review runs. CodeRabbit flags two nits → fix and push → *another* review runs. Meanwhile the content team (also you) is opening separate PRs just to update hooks.md and team_decisions.md — each one burns a review slot on files AI review can't meaningfully critique.
+
+**The diagnostic moment:** stepping back and looking at the commit graph. Of the last 10 PRs, 4 were content-only. Of the rest, average push count per PR was 3–4. So roughly 70% of CodeRabbit's review budget was going to either (a) documentation it wasn't qualified to review, or (b) re-reviews of tiny follow-up fixes the author could have batched.
+
+**The fix (no paid upgrade):**
+1. A `.coderabbit.yaml` with path filters — CodeRabbit stops reviewing content/, notes/, showdown/ (submodule), runs/, data/, and planning *.md files. Quota reallocated to actual code.
+2. Batch all CodeRabbit feedback into one commit per review round. Matches open-source convention anyway.
+3. Switch PR merge strategy from `--merge` to `--squash`. Local granular commits collapse into one clean commit on master. Full history still visible in the closed PR on GitHub. Means you can commit as often as you want locally without worrying about master log noise.
+
+**Visual:** Split screen. Left: "Before — 4 commits, 4 reviews, quota exhausted by 2pm." Right: "After — 4 commits locally, 1 push, 1 review, quota still healthy at EOD." Plus a side panel showing the `.coderabbit.yaml` path filters visibly *subtracting* the excluded directories from what gets reviewed.
+
+**Why it's great content:** Every developer who's used AI review hits this wall. The "lose details with squash-merge?" question is a very common beginner worry with a clean answer (you don't — GitHub preserves it). And the framing — "we tuned our workflow to respect an AI tool's budget the same way we'd tune hyperparams" — makes it land on this channel specifically.

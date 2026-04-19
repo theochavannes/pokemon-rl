@@ -904,3 +904,30 @@ at gamma=0.99 remains the best achievable with current setup.
 **BC retrain required:** Role features are appended at the end of the obs (compatible with `obs_transfer.py` zero-padding), but since we're also changing the species pool in the same cycle, the simplest path is full BC retraining instead of a transfer-learning warm-start.
 
 **Why this should help:** Panel hypothesis — the value function currently has to infer role implicitly from (stat block + revealed moves). That's noisy, especially for the opponent whose moves are only partially revealed. Giving it role directly is a strong prior, like labelling the positions on a chess board instead of making the network infer piece identity from location.
+
+---
+
+## 2026-04-19 — CodeRabbit Quota: Config + Workflow Changes
+
+**Problem:** CodeRabbit free tier caps reviews at ~2/hour. Each push to an open PR triggers a re-review, burning quota fast. PR #26 alone had 4 pushes (feature + CodeRabbit fix + ASCII fix + species normalization). PRs #20, #23, #24 were content-only (hooks.md / team_decisions.md) yet still consumed review cycles where AI review adds nothing.
+
+**Decision:** No paid upgrade. Three-layer fix that's also independently good practice:
+
+1. **`.coderabbit.yaml` with path filters** — exclude `content/`, `notes/`, `showdown/` (submodule), `runs/`, `data/`, and root-level planning `*.md` (PLAN, IMPROVEMENT_PROMPT, AI_TOOLS_EXPLAINED, SETUP_AI_TOOLS). CLAUDE.md and README.md remain reviewable because they affect workflow. Also `auto_review.drafts: false` and `profile: chill` to reduce noise per review.
+
+2. **CLAUDE.md step 6 — batch feedback into one commit per review round.** Commit title: `Address CodeRabbit feedback on PR #<N>`. Matches open-source convention; collapses N re-reviews into 1.
+
+3. **CLAUDE.md step 7 — switch merge strategy from `--merge` to `--squash`.** Master history shows one commit per PR (clean). Full per-commit history stays visible in the closed PR on GitHub. Local granular commits become free (they collapse on merge), eliminating the tension between "commit often" and "don't trigger re-reviews."
+
+**Alternatives considered:**
+- Paid CodeRabbit tier ($15–24/dev/mo): works but recurring cost for a personal RL project.
+- Manual `@coderabbitai review` only: full control but easy to forget.
+- Mega-PRs bundling unrelated work: rejected — sacrifices focus and reviewability.
+
+**Why this isn't a quality compromise:**
+- Path filters only skip files AI review can't meaningfully critique (prose, training artifacts, submodule).
+- Batched feedback commits are *cleaner* history, not messier.
+- Squash-merge is the modern default at GitHub, Stripe, Linear, Vercel. Linux kernel / Rust prefer merge because contributors craft atomic commits — not our workflow.
+- Small focused PRs remain the norm. Only content-only *documentation* PRs get folded into their parent code PR.
+
+**Rollback cost:** zero. Delete `.coderabbit.yaml`, revert CLAUDE.md edit, behavior returns to current state immediately.
