@@ -850,6 +850,16 @@ class TestRoleFeatures:
 
         assert sum(roles_for("nonexistent_mon")) == 0
 
+    def test_display_name_normalization(self):
+        """roles_for normalizes hyphens, spaces, periods, apostrophes, and case."""
+        from src.tier_baseline import roles_for
+
+        # Display-name variants should resolve to the same vector as the canonical key.
+        canonical = roles_for("mrmime")
+        assert roles_for("Mr. Mime") == canonical
+        assert roles_for("MR-MIME") == canonical
+        assert roles_for("Farfetch'd") == roles_for("farfetchd")
+
     def test_role_block_dims(self):
         """Obs should end with 168 role dims (14 slots × 12 roles)."""
         from src.env.gen1_env import embed_battle

@@ -323,7 +323,7 @@ def _role_features(pokemon) -> list:
     if pokemon is None:
         return [0.0] * NUM_ROLES
     try:
-        species = pokemon.species.lower().replace("-", "").replace(" ", "")
+        species = pokemon.species
     except Exception:
         return [0.0] * NUM_ROLES
     return [float(x) for x in roles_for(species)]

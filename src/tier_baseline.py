@@ -292,7 +292,7 @@ _ZERO_ROLE_VEC = [0] * NUM_ROLES
 
 def roles_for(species: str) -> list[int]:
     """Return the 12-dim role vector for a species, or all zeros if unknown."""
-    return GEN1_ROLE_MAP.get(species, _ZERO_ROLE_VEC)
+    return GEN1_ROLE_MAP.get(_normalize_species(species), _ZERO_ROLE_VEC)
 
 
 def team_score(team: dict) -> float:
