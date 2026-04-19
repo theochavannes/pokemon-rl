@@ -222,7 +222,7 @@ def main(run_id: str | None = None, new_run: bool = False) -> None:
     final_path = str(Path(run.models_dir) / "selfplay_final")
     model.save(final_path)
     run.mark_complete()
-    print(f"\nSelf-play complete → {final_path}.zip")
+    print(f"\nSelf-play complete -> {final_path}.zip")
 
 
 if __name__ == "__main__":

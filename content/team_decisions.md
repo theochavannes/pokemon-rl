@@ -1016,3 +1016,44 @@ The mean arm says "overall competence," the min arm says "no opponent is a hard 
 **Impl:** new `stop_heuristic_mean` / `stop_heuristic_min` kwargs on `WinRateCallback`; `CURRICULUM[0]` in `src/train.py` sets them to 0.65 / 0.50. When both are `None`, the code falls back to the old pooled-WR behavior.
 
 **Open question:** `_expected_damage` in `heuristic_agent.py` is still the crude `bp × eff` proxy. The new obs features use the full formula. If we decide to also improve the heuristic players' damage calcs, that's a separate PR — for now they're parallel implementations.
+
+---
+
+## 2026-04-19 (night) — run_057 Post-Mortem: KO Features Helped, But Plateau Persists
+
+**run_057 killed at step 382K.** Summary of what was learned.
+
+**Results:**
+
+| Run | Obs | Pool | Peak WR | BestMv% | vol_switch | Steps to peak |
+|-----|-----|------|---------|---------|-----------|---------------|
+| run_054 | 1559 | all-species | 69% | 58–59% | 0.6% | ~99K |
+| run_056 | 1727 | OU-only | 58% | 44–45% | 0.8% | ~188K |
+| run_057 | 1739 | OU-only | 65% | 45–46% | 1.2% | ~355K |
+
+**What the KO features did:**
+- BestMv% improved: 44% → 45–46% (small but consistent).
+- dmg_eff improved: 0.56 → 0.59.
+- New OU-pool WR record: 65% (vs run_056's 58%).
+- `prob_ko` helped within-turn move selection — agent picks more damaging/decisive moves.
+
+**What the KO features did NOT do:**
+- vol_switch barely moved: 1.0% → 1.2%. `recharge_trap` didn't shift switch behavior.
+- The plateau pattern was identical to run_056 — average WR ~47%, spikes to 60–65%, collapses back.
+- BestMv% froze at 45.0% for the final 60K steps — policy fully stalled.
+
+**Root cause of flat vol_switch:** Switching has a delayed reward signal. The benefit of a good switch isn't observable until the next turn (or later), making credit assignment hard under noisy returns. `recharge_trap` is the right signal, but the network can't reliably compose it with the future opponent move value under sparse rewards.
+
+**The comparability problem:** run_054 (all-species, n_steps=4096) vs run_056/057 (OU-only, n_steps=2048) are not apples-to-apples. Key differences: (1) OU-only pool removes weak filler — every opponent is Tauros/Alakazam/Starmie tier. (2) n_steps halved. Both likely explain the BestMv% drop from 58% → 45%.
+
+**Hypotheses for what's actually blocking progress:**
+
+1. **n_steps too small.** run_054 used n_steps=4096 and achieved 58% BestMv%. run_056/057 use 2048 and plateau at 45%. Larger rollouts = more stable gradient estimates + better credit assignment for switch rewards. Most likely single lever.
+
+2. **OU-pool difficulty.** With no weak mons in the pool, the gap between "best" and "second-best" move is smaller. This makes BestMv% harder to push up and makes the policy surface noisier.
+
+3. **Network capacity.** 256×128 MLP over 1739 features may be underpowered. The feature-to-parameter ratio has grown significantly since obs was 421. Not tested yet.
+
+4. **Role features adding noise.** 168 new binary/continuous dims added at obs 1727. No ablation was done on their individual contribution. BestMv% fell when they were added, which is suspicious.
+
+**Decided:** Do not launch run_058 immediately. Open a structured comparison before the next run to isolate the n_steps variable (most impactful, cheapest to test).

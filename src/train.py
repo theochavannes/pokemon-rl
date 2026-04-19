@@ -35,7 +35,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from src.callbacks import WinRateCallback
 from src.env.gen1_env import make_env
 from src.logging_config import setup_logging
-from src.obs_transfer import is_compatible, load_with_expanded_obs
+from src.obs_transfer import is_compatible, load_with_expanded_obs, transfer_and_save
 from src.run_manager import RunManager
 
 log = logging.getLogger("pokemon_rl.train")
@@ -178,8 +178,8 @@ def main(new_run: bool = False) -> None:
             print(f"  Resuming from step {done:,} — {remaining_steps:,} steps remaining")
 
         print(
-            f"  Target: mean≥{phase.get('target_heuristic_mean', phase['target_wr']) * 100:.0f}%"
-            f" & min≥{phase.get('target_heuristic_min', phase['target_wr']) * 100:.0f}%"
+            f"  Target: mean>={phase.get('target_heuristic_mean', phase['target_wr']) * 100:.0f}%"
+            f" & min>={phase.get('target_heuristic_min', phase['target_wr']) * 100:.0f}%"
             f" (heuristics only)  |  Cap: {remaining_steps:,} steps (~{remaining_steps // 75:,} battles)"
         )
         print(f"  Reward shaping: {shaping:.0%}")
@@ -191,23 +191,50 @@ def main(new_run: bool = False) -> None:
         print(f"  Replays -> {replay_dir}")
         print(f"{'=' * 60}\n")
 
-        # Save current best as initial frozen opponent for self-play
+        # Save current best as initial frozen opponent for self-play. Env construction
+        # (below) will try to load this file, so it must exist AND match the new
+        # obs_dim when the obs space has just grown.
+        # Build a placeholder env to query the target obs_dim.
+        _probe_fn = partial(
+            make_env,
+            env_index=0,
+            battle_format=BATTLE_FORMAT,
+            save_replays=replay_dir,
+            opponent_type="random",  # skip self-play dep for the probe
+            shaping_factor=shaping,
+            opponent_difficulty=0.0,
+            selfplay_model_path=None,
+        )
+        _probe_env = DummyVecEnv([_probe_fn])
+        _target_obs_dim = _probe_env.observation_space.shape[0]
+        _probe_env.close()
+
         if selfplay_path:
             best = Path(run.models_dir) / "best_model.zip"
             if best.exists():
                 from sb3_contrib import MaskablePPO as _PPO
 
-                _PPO.load(str(best.with_suffix(""))).save(selfplay_path)
+                seed_path = str(best.with_suffix(""))
+                if is_compatible(seed_path, _target_obs_dim):
+                    _PPO.load(seed_path).save(selfplay_path)
+                else:
+                    transfer_and_save(seed_path, _target_obs_dim, selfplay_path, ppo_kwargs=PPO_KWARGS)
+                    print(f"  Self-play: transferred best_model to {_target_obs_dim}-dim frozen opponent")
             elif model is not None:
                 model.save(selfplay_path)
             else:
-                # First phase, no model yet — use BC warm-start as initial frozen opponent
+                # First phase, no model yet — use BC warm-start, transferring if needed.
                 bc_seed = Path("models/bc_warmstart.zip")
                 if bc_seed.exists():
                     from sb3_contrib import MaskablePPO as _PPO
 
-                    _PPO.load(str(bc_seed.with_suffix(""))).save(selfplay_path)
-                    print("  Self-play: initialized frozen opponent from BC warm-start")
+                    seed_path = str(bc_seed.with_suffix(""))
+                    if is_compatible(seed_path, _target_obs_dim):
+                        _PPO.load(seed_path).save(selfplay_path)
+                        print("  Self-play: initialized frozen opponent from BC warm-start")
+                    else:
+                        transfer_and_save(seed_path, _target_obs_dim, selfplay_path, ppo_kwargs=PPO_KWARGS)
+                        print(f"  Self-play: BC warm-start transferred to {_target_obs_dim}-dim frozen opponent")
                 else:
                     raise FileNotFoundError(
                         "Self-play requires a model but no best_model.zip or models/bc_warmstart.zip found"
