@@ -43,3 +43,11 @@ src/replays/
 
 # Meta-prompts
 IMPROVEMENT_PROMPT.md
+
+# Internal planning and content (YouTube, dev notes)
+notes/
+content/
+
+# Internal tooling docs
+AI_TOOLS_EXPLAINED.md
+SETUP_AI_TOOLS.md
