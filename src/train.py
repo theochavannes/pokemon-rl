@@ -70,7 +70,13 @@ CURRICULUM = [
         name="A",
         opponent_type="mixed_league",
         phase_label="League",
-        target_wr=0.70,
+        # Heuristic-only gate excludes SelfPlay (mirror-match caps ~50% by construction).
+        # Phase completes when BOTH mean and min over (MaxDmg, TypeMatch, SoftmaxDmg)
+        # clear their thresholds for 2 consecutive evals.
+        target_heuristic_mean=0.65,
+        target_heuristic_min=0.50,
+        # Pooled target_wr retained for headline display only.
+        target_wr=0.65,
         max_steps=2_000_000,
         shaping_factor=1.0,
         epsilon_start=2.0,  # SoftmaxDamagePlayer temperature: 2.0 = soft, anneals to 0.1
@@ -172,7 +178,9 @@ def main(new_run: bool = False) -> None:
             print(f"  Resuming from step {done:,} — {remaining_steps:,} steps remaining")
 
         print(
-            f"  Target: {phase['target_wr'] * 100:.0f}%  |  Cap: {remaining_steps:,} steps (~{remaining_steps // 75:,} battles)"
+            f"  Target: mean≥{phase.get('target_heuristic_mean', phase['target_wr']) * 100:.0f}%"
+            f" & min≥{phase.get('target_heuristic_min', phase['target_wr']) * 100:.0f}%"
+            f" (heuristics only)  |  Cap: {remaining_steps:,} steps (~{remaining_steps // 75:,} battles)"
         )
         print(f"  Reward shaping: {shaping:.0%}")
         if epsilon_start is not None:
@@ -377,6 +385,8 @@ def main(new_run: bool = False) -> None:
             notable_dir=str(Path(run.run_dir) / "replays" / "notable"),
             verbose=1,
             stop_at_win_rate=phase["target_wr"],
+            stop_heuristic_mean=phase.get("target_heuristic_mean"),
+            stop_heuristic_min=phase.get("target_heuristic_min"),
             phase_label=phase["phase_label"],
             training_log_path=run.training_log,
             run_id=run.run_id,

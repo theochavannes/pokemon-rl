@@ -3,16 +3,16 @@ Gen 1 (RBY) Gymnasium environment.
 
 Wraps poke-env's SinglesEnv for use with MaskablePPO.
 
-Observation space : Box(-1, 1, shape=(1727,), float32)
+Observation space : Box(-1, 1, shape=(1739,), float32)
 Action space      : Discrete — provided by SinglesEnv, masked via action_masks()
 Reward            : Shaped (fainted/HP/status deltas) + terminal victory bonus
 
 Env stack for training:
     Gen1Env (SinglesEnv subclass)
         ↓
-    SingleAgentWrapper   obs = {"observation": np.array(1727,), "action_mask": np.array(N,)}
+    SingleAgentWrapper   obs = {"observation": np.array(1739,), "action_mask": np.array(N,)}
         ↓
-    SB3Wrapper           obs = np.array(1727,)  +  action_masks() -> bool array
+    SB3Wrapper           obs = np.array(1739,)  +  action_masks() -> bool array
         ↓
     DummyVecEnv / SubprocVecEnv
 """
@@ -315,7 +315,9 @@ def _base_stats(pokemon) -> list:
 
 
 _ROLE_DIMS = NUM_ROLES * 14  # 14 slots × 12 roles = 168
-_OBS_DIM = 1559 + _ROLE_DIMS  # 1727
+_KO_FEATS_PER_MOVE = 3  # [expected_dmg_fraction, prob_ko, recharge_trap]
+_KO_DIMS = _KO_FEATS_PER_MOVE * 4  # 4 moves × 3 = 12
+_OBS_DIM = 1559 + _ROLE_DIMS + _KO_DIMS  # 1739
 
 
 def _role_features(pokemon) -> list:
@@ -329,9 +331,155 @@ def _role_features(pokemon) -> list:
     return [float(x) for x in roles_for(species)]
 
 
+# Gen 1 stat-stage multipliers (ratio form, not linear Gen 2+ form)
+_GEN1_BOOST_MULT = {
+    -6: 2 / 8,
+    -5: 2 / 7,
+    -4: 2 / 6,
+    -3: 2 / 5,
+    -2: 2 / 4,
+    -1: 2 / 3,
+    0: 1.0,
+    1: 3 / 2,
+    2: 4 / 2,
+    3: 5 / 2,
+    4: 6 / 2,
+    5: 7 / 2,
+    6: 8 / 2,
+}
+
+
+def _apply_gen1_boost(stat: float, stage: int) -> float:
+    return stat * _GEN1_BOOST_MULT.get(max(-6, min(6, int(stage))), 1.0)
+
+
+def _ko_features(move, attacker, defender) -> list:
+    """
+    Return 3 floats per move:
+      [expected_dmg_fraction, prob_ko, recharge_trap]
+
+    - expected_dmg_fraction: E[damage] / defender_current_hp, clamped [0, 1.5]
+                             folds accuracy in (so miss reduces expectation)
+    - prob_ko: P(damage >= defender_current_hp) over Gen 1 (217..255)/255 rolls,
+               multiplied by accuracy (unconditional hit+KO probability)
+    - recharge_trap: must_recharge × (1 - prob_ko) — "this click commits me to a
+                     recharge turn while the target is probably still alive"
+
+    Returns zeros for status moves, unknown moves, or when the required state
+    (stats, current_hp_fraction) is missing.
+    """
+    if move is None or attacker is None or defender is None:
+        return [0.0, 0.0, 0.0]
+    try:
+        bp = move.base_power
+    except Exception:
+        return [0.0, 0.0, 0.0]
+    try:
+        category = move.category
+    except Exception:
+        category = None
+    if category == MoveCategory.STATUS:
+        return [0.0, 0.0, 0.0]
+
+    # Stat lookups (Gen 1: single Special stat used for both spa/spd)
+    atk_key = "atk" if category == MoveCategory.PHYSICAL else "spa"
+    def_key = "def" if category == MoveCategory.PHYSICAL else "spd"
+
+    try:
+        atk_stats = attacker.stats or {}
+        def_stats = defender.stats or {}
+        a_stat = float(atk_stats.get(atk_key) or 1)
+        d_stat = float(def_stats.get(def_key) or def_stats.get("spa") or 1)
+    except (TypeError, ValueError, AttributeError):
+        return [0.0, 0.0, 0.0]
+
+    # Apply stat-stage boosts (Gen 1 ratio form)
+    try:
+        a_stat = _apply_gen1_boost(a_stat, attacker.boosts.get(atk_key, 0) if attacker.boosts else 0)
+        d_stat = _apply_gen1_boost(d_stat, defender.boosts.get(def_key, 0) if defender.boosts else 0)
+    except (TypeError, AttributeError):
+        pass
+
+    # Burn halves physical attack (Gen 1)
+    if category == MoveCategory.PHYSICAL and attacker.status == Status.BRN:
+        a_stat /= 2
+
+    # Accuracy (True in poke-env means "never misses" -> 1.0)
+    try:
+        acc = float(move.accuracy) if move.accuracy is not True else 1.0
+    except Exception:
+        acc = 1.0
+
+    # Defender current HP (estimated from max-HP stat × fraction)
+    try:
+        max_hp = float(def_stats.get("hp") or 1)
+        hp_frac_raw = defender.current_hp_fraction
+        hp_frac = float(hp_frac_raw) if hp_frac_raw is not None else 1.0
+    except (TypeError, ValueError, AttributeError):
+        return [0.0, 0.0, 0.0]
+    cur_hp = max(max_hp * hp_frac, 1.0)
+
+    # Fixed-damage moves (Seismic Toss / Night Shade at L100 = 100 damage, Dragon Rage = 40)
+    damage_spec = getattr(move, "damage", None)
+    if damage_spec == "level":
+        mean_dmg = min_dmg = max_dmg = 100.0
+    elif isinstance(damage_spec, int | float) and damage_spec and damage_spec > 0:
+        mean_dmg = min_dmg = max_dmg = float(damage_spec)
+    else:
+        if bp <= 0:
+            return [0.0, 0.0, 0.0]
+        # Gen 1 damage formula (ignoring crits — effect is small on expectation)
+        # ((2*L/5 + 2) * A * BP / D) / 50 + 2, then × STAB × type-effectiveness
+        base = ((2 * 100 / 5 + 2) * a_stat * bp / max(d_stat, 1)) / 50 + 2
+        try:
+            stab = 1.5 if move.type in (attacker.type_1, attacker.type_2) else 1.0
+        except Exception:
+            stab = 1.0
+        try:
+            eff = move.type.damage_multiplier(defender.type_1, defender.type_2, type_chart=_GEN1_TYPE_CHART)
+        except Exception:
+            eff = 1.0
+        mod = stab * eff
+        # Gen 1 damage RNG: multiply by (217..255)/255
+        mean_dmg = base * mod * (236 / 255)
+        min_dmg = base * mod * (217 / 255)
+        max_dmg = base * mod
+
+    # Expected damage fraction (folding accuracy in; clamp high values)
+    exp_frac = min(mean_dmg * acc / cur_hp, 1.5)
+
+    # Prob KO given hit, then scaled by accuracy
+    if min_dmg >= cur_hp:
+        prob_ko_on_hit = 1.0
+    elif max_dmg < cur_hp:
+        prob_ko_on_hit = 0.0
+    elif min_dmg == max_dmg:
+        # Fixed-damage move in KO-threshold band (max_dmg >= cur_hp)
+        prob_ko_on_hit = 1.0
+    else:
+        # Damage is uniform over 39 integer rolls (217..255)
+        scale = mean_dmg / (236 / 255) if mean_dmg > 0 else 0.0  # recover base*mod
+        n_kos = sum(1 for r in range(217, 256) if scale * r / 255 >= cur_hp) if scale else 0
+        prob_ko_on_hit = n_kos / 39.0
+    prob_ko = prob_ko_on_hit * acc
+
+    # Recharge-trap flag: move forces recharge, and target probably survives the hit
+    must_recharge = 0.0
+    try:
+        self_entry = (move.entry.get("self") if move.entry else None) or {}
+        if self_entry.get("volatileStatus") == "mustrecharge" or "recharge" in (getattr(move, "flags", None) or {}):
+            must_recharge = 1.0
+    except Exception:
+        must_recharge = 0.0
+
+    recharge_trap = must_recharge * (1.0 - prob_ko)
+
+    return [float(exp_frac), float(prob_ko), float(recharge_trap)]
+
+
 def embed_battle(battle) -> np.ndarray:
     """
-    Produces a 1727-dim float32 observation from a poke-env Battle object.
+    Produces a 1739-dim float32 observation from a poke-env Battle object.
 
     Observation layout:
       Own active        16    HP, 6 boosts, status, active, fainted, types, base stats
@@ -348,6 +496,7 @@ def embed_battle(battle) -> np.ndarray:
       Toxic counter      1
       Turn phase         1    normalized turn number (S7.2)
       Role features    168    14 slots × 12 roles (own active+6 bench, opp active+6 bench)
+      KO-probability    12    4 moves × [expected_dmg_fraction, prob_ko, recharge_trap]
     """
     obs = []
     own = battle.active_pokemon
@@ -515,6 +664,13 @@ def embed_battle(battle) -> np.ndarray:
         else:
             obs.extend([0.0] * NUM_ROLES)
 
+    # --- KO-probability features for own active's 4 moves vs opp active (12 dims) ---
+    for i in range(4):
+        if i < len(moves):
+            obs.extend(_ko_features(moves[i], own, opp))
+        else:
+            obs.extend([0.0] * _KO_FEATS_PER_MOVE)
+
     result = np.array(obs, dtype=np.float32)
     assert result.shape == (_OBS_DIM,), f"Obs shape mismatch: expected ({_OBS_DIM},), got {result.shape}"
     assert np.all(np.isfinite(result)), "Obs contains NaN/Inf"
@@ -525,7 +681,7 @@ class Gen1Env(SinglesEnv):
     """
     Gen 1 random battle environment for MaskablePPO.
 
-    Observation: 1727-dim float32 vector (see embed_battle docstring for layout).
+    Observation: 1739-dim float32 vector (see embed_battle docstring for layout).
     """
 
     def __init__(self, shaping_factor: float = 1.0, **kwargs):

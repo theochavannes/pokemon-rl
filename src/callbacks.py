@@ -71,6 +71,8 @@ class WinRateCallback(BaseCallback):
         notable_dir: str = "replays/notable",
         verbose: int = 1,
         stop_at_win_rate: float | None = None,
+        stop_heuristic_mean: float | None = None,
+        stop_heuristic_min: float | None = None,
         phase_label: str = "",
         training_log_path: str | None = None,
         run_id: str = "",
@@ -98,6 +100,8 @@ class WinRateCallback(BaseCallback):
         self.replay_dir = Path(replay_dir)
         self.notable_dir = Path(notable_dir)
         self.stop_at_win_rate = stop_at_win_rate
+        self.stop_heuristic_mean = stop_heuristic_mean
+        self.stop_heuristic_min = stop_heuristic_min
         self.phase_label = phase_label or ""
         self.run_id = run_id
         self.epsilon_schedule = epsilon_schedule  # (start, end) or None
@@ -301,26 +305,41 @@ class WinRateCallback(BaseCallback):
                                 self._eps_warned = True
 
                 win_rate = float(np.mean([1.0 if r >= 0.5 else 0.0 for r in self._episode_rewards]))
-                if win_rate >= self.stop_at_win_rate and epsilon_done:
+
+                # Heuristic-only mean+min gate (if both thresholds set) — excludes
+                # SelfPlay since mirror matches cap around 50% by construction.
+                heur_gate_active = self.stop_heuristic_mean is not None and self.stop_heuristic_min is not None
+                if heur_gate_active:
+                    heur_wrs = [
+                        float(np.mean(list(self._per_env_results[i])))
+                        for i in (1, 2, 3)  # MaxDmg, TypeMatch, SoftmaxDmg
+                        if len(self._per_env_results[i]) > 0
+                    ]
+                    if len(heur_wrs) < 3:
+                        gate_pass = False  # need all three opponents sampled
+                        heur_mean = heur_min = float("nan")
+                    else:
+                        heur_mean = float(np.mean(heur_wrs))
+                        heur_min = float(np.min(heur_wrs))
+                        gate_pass = heur_mean >= self.stop_heuristic_mean and heur_min >= self.stop_heuristic_min
+                    gate_desc = f"heur_mean={heur_mean:.3f}>=%.2f heur_min={heur_min:.3f}>=%.2f" % (
+                        self.stop_heuristic_mean,
+                        self.stop_heuristic_min,
+                    )
+                else:
+                    gate_pass = win_rate >= self.stop_at_win_rate
+                    gate_desc = f"win_rate={win_rate:.3f}>={self.stop_at_win_rate:.3f}"
+
+                if gate_pass and epsilon_done:
                     if not self._target_hit_once:
                         self._target_hit_once = True
-                        log.info(
-                            "Target hit: win_rate=%.3f >= %.3f — confirming next eval", win_rate, self.stop_at_win_rate
-                        )
+                        log.info("Target hit: %s — confirming next eval", gate_desc)
                         if self.verbose:
-                            print(
-                                f"  [Target hit] win rate {win_rate:.3f} >= {self.stop_at_win_rate} at epsilon 0.0 — confirming..."
-                            )
+                            print(f"  [Target hit] {gate_desc} at epsilon 0.0 — confirming...")
                     else:
-                        log.info(
-                            "Phase complete: win_rate=%.3f >= %.3f at full difficulty — advancing",
-                            win_rate,
-                            self.stop_at_win_rate,
-                        )
+                        log.info("Phase complete: %s at full difficulty — advancing", gate_desc)
                         if self.verbose:
-                            print(
-                                f"  [Phase complete] win rate {win_rate:.3f} >= {self.stop_at_win_rate} at full difficulty — advancing"
-                            )
+                            print(f"  [Phase complete] {gate_desc} at full difficulty — advancing")
                         return False
                 else:
                     self._target_hit_once = False
