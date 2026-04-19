@@ -189,7 +189,7 @@ class DataCollectingPlayer:
         )
         print(
             f"  [{self._opponent_name}] Saved batch {self._batch_idx} "
-            f"({len(self.observations)} transitions, {n_battles} battles) → {path.name}"
+            f"({len(self.observations)} transitions, {n_battles} battles) -> {path.name}"
         )
         self._batch_idx += 1
         self._last_flush_battles = self.n_finished_battles
