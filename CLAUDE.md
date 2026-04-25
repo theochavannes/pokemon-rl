@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Never include "Co-Authored-By: Claude" or any mention of Claude in commit messages. Commits must always appear as authored solely by the user.
 
+## Autonomous sessions
+
+At the start of any autonomous multi-step session, run `echo "<task description>" > .claude/task.md`. Delete it with `rm -f .claude/task.md` only when all tasks are complete. The `enforce-stop.sh` hook blocks session exit while this file exists.
+
 ## Multi-Agent Team
 
 This project uses a 5-persona dev team ([ML], [SYS], [REVIEW], [MEDIA], [PM]) plus specialists ([POKE-ENV], [GYM], [RBY], [SB3], [SE], [RL]). See `AGENTS.md` for full roles and decisions log.
