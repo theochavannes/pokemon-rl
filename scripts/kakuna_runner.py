@@ -25,8 +25,7 @@ async def run(args: argparse.Namespace) -> None:
     if mft_repo not in sys.path:
         sys.path.insert(0, mft_repo)
 
-    from poke_env.ps_client.account_configuration import AccountConfiguration
-
+    from poke_env.ps_client.account_configuration import AccountConfiguration  # noqa: I001
     from src.neural_player import MetamonNeuralPlayer
 
     kwargs: dict = dict(
