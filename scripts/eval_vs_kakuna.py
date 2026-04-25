@@ -40,7 +40,9 @@ from poke_env.ps_client.server_configuration import ServerConfiguration
 BATTLE_FORMAT = "gen1randombattle"
 MODEL_PATH = "models/best_model_v1"
 
-_METAMON_PYTHON_DEFAULT = str(Path.home() / "miniconda3" / "envs" / "metamon_ft" / "python.exe")
+_METAMON_PYTHON_DEFAULT = str(
+    Path.home() / "miniconda3" / "envs" / "metamon_ft" / ("python.exe" if sys.platform == "win32" else "bin/python")
+)
 _METAMON_CACHE_DEFAULT = str(Path.home() / ".metamon")
 _KAKUNA_RUNNER = str(Path(__file__).parent / "kakuna_runner.py")
 _DEFAULT_CHECKPOINT = "data/eval_vs_kakuna_checkpoint.json"
@@ -271,6 +273,7 @@ async def main(args) -> None:
             try:
                 bw, bl = await _run_batch(challenger, kakuna_name, proc, line_q, batch_n)
             except Exception as e:
+                proc.kill()
                 total_done = cum_wins + cum_losses
                 print(f"\n  Batch failed: {e}")
                 print(f"  Progress saved at {total_done}/{args.n} battles. Re-run to resume.")
@@ -278,9 +281,10 @@ async def main(args) -> None:
                 _save_checkpoint(args.checkpoint, results)
                 break
 
+            resolved = bw + bl
             cum_wins += bw
             cum_losses += bl
-            remaining -= batch_n
+            remaining -= resolved
 
             results[label] = {"wins": cum_wins, "losses": cum_losses}
             _save_checkpoint(args.checkpoint, results)
