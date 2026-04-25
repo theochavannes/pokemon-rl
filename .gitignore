@@ -52,3 +52,6 @@ content/
 # Internal tooling docs
 AI_TOOLS_EXPLAINED.md
 SETUP_AI_TOOLS.md
+
+# Claude Code local files
+.claude/

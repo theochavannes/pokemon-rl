@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, main]
   pull_request:
-    branches: [master]
+    branches: [master, main]
 
 jobs:
   lint:
@@ -28,7 +28,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: |
-          pip install --extra-index-url https://download.pytorch.org/whl/cpu -e ".[dev]"
+        run: pip install -e ".[dev]"
       - name: Run tests
+        if: hashFiles('tests/') != ''
         run: pytest tests/ -v --timeout=30 --tb=short
